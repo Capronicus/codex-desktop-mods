@@ -44,8 +44,9 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     .csc-action { background: transparent; border-radius: 7px; padding: 5px 8px; color: inherit; font: inherit; }
     .csc-action:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
     [data-csc-chat-key][data-csc-activity-day] {
-      --csc-freshness: clamp(0%, calc((attr(data-csc-activity-day type(<number>)) - var(--csc-clock-day) + 14) * 100% / 13), 100%);
-      --csc-chat-tone: color-mix(in srgb, var(--csc-new) var(--csc-freshness), var(--csc-old));
+      --csc-age-days: calc(var(--csc-clock-day) - attr(data-csc-activity-day type(<number>)));
+      --csc-brightness: clamp(75%, calc(100% - (var(--csc-age-days) - 1) * 25% / 13), 100%);
+      --csc-chat-tone: color-mix(in srgb, var(--csc-row-base) var(--csc-brightness), black);
     }
     [data-csc-chat-key]:is([data-app-action-sidebar-thread-pinned="true"], [data-csc-cloud-pinned="true"])::after {
       content: ""; position: absolute; inset: 0; pointer-events: none;
@@ -78,38 +79,8 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
   function attr(name, id) { return '[' + name + '="' + CSS.escape(id) + '"]'; }
   function read(kind, id) { return id ? getPreference(key(kind, id), null) : null; }
 
-  function blend(rgb, target, amount) {
-    return rgb.map((value, index) => {
-      const end = Array.isArray(target) ? target[index] : target;
-      return Math.round(value + (end - value) * amount);
-    });
-  }
-  function luminance(rgb) {
-    const [r, g, b] = rgb.map(channel => {
-      const s = channel / 255;
-      return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4;
-    });
-    return .2126 * r + .7152 * g + .0722 * b;
-  }
-  function readable(rgb, backdrop, minimum, toward) {
-    const bg = luminance([backdrop, backdrop, backdrop]) + .05;
-    for (let step = 0; step <= 20; step++) {
-      const shade = blend(rgb, toward, step / 20);
-      const ratio = (luminance(shade) + .05) / bg;
-      if (Math.max(ratio, 1 / ratio) >= minimum) return shade;
-    }
-    return blend(rgb, toward, 1);
-  }
   function chatRules(selectors, value) {
-    const base = value.slice(1).match(/../g).map(channel => parseInt(channel, 16));
-    const recentLight = readable(blend(base, 255, .15), 238, 4.5, 0);
-    const vivid = base.map(channel => Math.min(255, Math.round(channel * 1.18)));
-    const recentDark = readable(vivid, 36, 7, 255);
-    const oldLight = blend(recentLight, 0, .35);
-    const oldDark = readable(blend(base, 0, .48), 36, 4.5, recentDark);
-    const themes = (light, dark) => 'light-dark(rgb(' + light.join(' ') + '),rgb(' + dark.join(' ') + '))';
-    return selectors.join(',') + '{--csc-row-base:' + value + ';--csc-new:' + themes(recentLight, recentDark)
-      + ';--csc-old:' + themes(oldLight, oldDark) + '}' +
+    return selectors.join(',') + '{--csc-row-base:' + value + '}' +
       selectors.map(s => s + ' [data-csc-chat-label]').join(',') + '{color:var(--csc-chat-tone,var(--csc-row-base)) !important}';
   }
 

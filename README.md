@@ -11,7 +11,7 @@ Right-click a project or chat and choose **Project colour…** or **Chat colour�
 ![A project colour picker showing amber on the wheel and brightness at 81%](images/colour-picker.png)
 
 - A project’s chats inherit its colour, including when they appear in Recents. Pick a colour for one chat to override it, or choose **Use project colour** to restore inheritance.
-- The project title keeps its chosen colour. A chat title is brightest for the first day after an update and gradually darkens over two weeks.
+- The project title keeps its chosen colour. For the first day after an update, a chat title shows its exact project colour or its individual override. It gradually dims to 75% brightness by day 14, keeping the same hue.
 - A thin outline marks pinned chats in light and dark themes.
 
 ## Timestamps and token use
@@ -62,3 +62,5 @@ Run the history reader and launcher tests from the repository folder. They use s
 node tests/chat-details.cjs
 python3 tests/updates.py
 ```
+
+With the Linux desktop app and Google Chrome installed, run `node tests/sidebar-colours.cjs` to check the rendered colours in both themes.
