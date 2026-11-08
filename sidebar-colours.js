@@ -1,12 +1,6 @@
-import {
-  $Bn as sidebarColourLocalProjects, zcr as initializePreferences, $cr as preferencesReady,
-  Lcr as getPreference, qcr as setPreference,
-  Rcr as preferenceKeys, Qcr as watchPreferencePrefix,
-} from './app-initial-fdea07eb2719.js';
-
 // Loaded alongside the desktop sidebar renderer. Each key is one local preference,
 // so edits to different items in separate windows cannot overwrite each other.
-const sidebarColours = (() => {
+function createSidebarColours({preferencesReady, getPreference, setPreference, preferenceKeys, watchPreferencePrefix}) {
   const prefix = 'codex.sidebar-colours.v1/';
   const projectAttr = 'data-app-action-sidebar-project-id';
   const projectListAttr = 'data-app-action-sidebar-project-list-id';
@@ -15,7 +9,6 @@ const sidebarColours = (() => {
   const ownerAttr = 'data-csc-owner';
   const hex = /^#[0-9a-f]{6}$/i;
   let rules, dialog;
-  initializePreferences();
   const ready = preferencesReady();
 
   const displayRules = document.createElement('style');
@@ -23,7 +16,7 @@ const sidebarColours = (() => {
     .csc-picker { color-scheme: inherit; font: inherit; font-size: 14px; padding: 20px;
       color: var(--color-text-primary, CanvasText); background: var(--color-background-surface, Canvas);
       border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 16px;
-      box-shadow: 0 12px 48px #0004; width: min(300px, calc(100vw - 40px)); margin: auto; }
+      box-shadow: 0 12px 48px #0004; width: min(320px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; margin: auto; }
     .csc-picker::backdrop { background: #0005; }
     .csc-picker h2 { margin: 0; font: inherit; font-weight: 650; font-size: 17px; }
     .csc-picker p { margin: 4px 0 15px; opacity: .75; overflow-wrap: anywhere; }
@@ -34,6 +27,19 @@ const sidebarColours = (() => {
     .csc-picker :focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
     .csc-custom, .csc-footer { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
     .csc-custom input { width: 40px; height: 30px; padding: 0; }
+    .csc-wheel { position:relative; width:min(158px, 100%); aspect-ratio:1; margin:12px auto;
+      border-radius:100%; touch-action:none; cursor:crosshair;
+      background:radial-gradient(closest-side, white, transparent),conic-gradient(from 90deg,red,#ff0,#0f0,#0ff,#00f,#f0f,red); }
+    .csc-wheel::before { content:""; position:absolute; inset:0; border-radius:inherit; background:black; opacity:var(--csc-shade); }
+    .csc-wheel-mark { position:absolute; width:12px; height:12px; border-radius:50%; border:2px solid white;
+      box-shadow:0 0 0 1px #111, inset 0 0 0 1px #111; transform:translate(-50%,-50%); pointer-events:none; }
+    .csc-brightness { display:grid; grid-template-columns:1fr auto; align-items:center; gap:5px; }
+    .csc-brightness output { font-variant-numeric:tabular-nums; }
+    .csc-brightness input { grid-column:1/-1; width:100%; height:18px; margin:0; appearance:none; background:transparent; }
+    .csc-brightness input::-webkit-slider-runnable-track { height:8px; border-radius:8px;
+      background:linear-gradient(to right,black,var(--csc-full)); box-shadow:inset 0 0 0 1px #8888; }
+    .csc-brightness input::-webkit-slider-thumb { appearance:none; width:16px; height:16px; margin-top:-4px;
+      border-radius:50%; background:var(--csc-selected); border:2px solid white; box-shadow:0 0 0 1px #222; }
     .csc-footer { justify-content: space-between; }
     .csc-action { background: transparent; border-radius: 7px; padding: 5px 8px; color: inherit; font: inherit; }
     .csc-action:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
@@ -151,6 +157,93 @@ const sidebarColours = (() => {
     button.addEventListener('click', run);
     return button;
   }
+  function customPicker(initial, save) {
+    const section = el('div');
+    const wheel = el('div', 'csc-wheel');
+    const mark = el('span', 'csc-wheel-mark');
+    wheel.append(mark);
+    wheel.tabIndex = 0;
+    wheel.setAttribute('role', 'slider');
+    wheel.setAttribute('aria-label', 'Colour wheel');
+    wheel.setAttribute('aria-valuemin', '0');
+    wheel.setAttribute('aria-valuemax', '360');
+    wheel.setAttribute('aria-description', 'Left and right change hue. Up and down change saturation.');
+    const brightness = el('label', 'csc-brightness', 'Brightness');
+    const percent = el('output');
+    const bar = el('input');
+    bar.type = 'range';
+    bar.min = '0'; bar.max = '100'; bar.step = '1';
+    bar.setAttribute('aria-label', 'Brightness');
+    brightness.append(percent, bar);
+    const row = el('div', 'csc-custom');
+    const swatch = el('input');
+    swatch.type = 'color';
+    swatch.setAttribute('aria-label', 'Custom colour');
+    let hue = 0, saturation = 0, value = 0;
+
+    function colour(v) {
+      const channel = offset => {
+        const k = (offset + hue / 60) % 6;
+        return Math.round(255 * v * (1 - saturation * Math.max(0, Math.min(k, 4-k, 1))))
+          .toString(16).padStart(2, '0');
+      };
+      return '#' + channel(5) + channel(3) + channel(1);
+    }
+    function render() {
+      const radians = hue * Math.PI / 180;
+      mark.style.left = (50 + 50 * saturation * Math.cos(radians)) + '%';
+      mark.style.top = (50 + 50 * saturation * Math.sin(radians)) + '%';
+      wheel.style.setProperty('--csc-shade', 1 - value);
+      wheel.setAttribute('aria-valuenow', String(Math.round(hue)));
+      wheel.setAttribute('aria-valuetext', Math.round(hue) + ' degrees, ' + Math.round(100 * saturation) + '% saturation');
+      swatch.value = colour(value);
+      bar.value = String(Math.round(100 * value));
+      percent.textContent = bar.value + '%';
+      brightness.style.setProperty('--csc-full', colour(1));
+      brightness.style.setProperty('--csc-selected', swatch.value);
+    }
+    function fromHex(code) {
+      const [r, g, b] = code.slice(1).match(/../g).map(c => parseInt(c, 16) / 255);
+      value = Math.max(r, g, b);
+      const delta = value - Math.min(r, g, b);
+      saturation = value ? delta / value : 0;
+      if (delta) {
+        const sector = value === r ? (g-b)/delta : value === g ? 2+(b-r)/delta : 4+(r-g)/delta;
+        hue = (60 * sector + 360) % 360;
+      }
+      render();
+    }
+    function point(event) {
+      const rect = wheel.getBoundingClientRect();
+      const dx = 2 * (event.clientX - rect.left) / rect.width - 1;
+      const dy = 2 * (event.clientY - rect.top) / rect.height - 1;
+      saturation = Math.min(1, Math.hypot(dx, dy));
+      if (saturation) hue = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+      render();
+    }
+    wheel.onpointerdown = event => {
+      if (!event.isPrimary || event.button !== 0) return;
+      wheel.setPointerCapture(event.pointerId); point(event);
+    };
+    wheel.onpointermove = event => { if (wheel.hasPointerCapture(event.pointerId)) point(event); };
+    wheel.onkeydown = event => {
+      const step = event.shiftKey ? 10 : 1;
+      switch (event.key) {
+        case 'ArrowLeft': hue = (hue - step + 360) % 360; break;
+        case 'ArrowRight': hue = (hue + step) % 360; break;
+        case 'ArrowUp': saturation = Math.min(1, saturation + step/100); break;
+        case 'ArrowDown': saturation = Math.max(0, saturation - step/100); break;
+        default: return;
+      }
+      event.preventDefault(); render();
+    };
+    bar.oninput = () => { value = Number(bar.value) / 100; render(); };
+    swatch.oninput = () => fromHex(swatch.value);
+    fromHex(initial);
+    row.append(swatch, action('Apply custom colour', () => save(swatch.value)));
+    section.append(wheel, brightness, row);
+    return section;
+  }
   async function open(kind, id) {
     if (!id) return;
     await ready;
@@ -191,12 +284,7 @@ const sidebarColours = (() => {
       swatch.style.backgroundColor = colour;
       grid.append(swatch);
     }
-    const customRow = el('div', 'csc-custom');
-    const custom = el('input');
-    custom.type = 'color';
-    custom.value = current || inherited || '#299e93';
-    custom.setAttribute('aria-label', 'Custom colour');
-    customRow.append(custom, action('Apply custom colour', () => save(custom.value)));
+    const customRow = customPicker(current || inherited || '#299e93', save);
     const footer = el('div', 'csc-footer');
     footer.append(action(project || !owner ? 'Use default colour' : 'Use project colour', () => save(null)),
       action('Cancel', () => box.close()));
@@ -244,4 +332,4 @@ const sidebarColours = (() => {
     setPreference(key('chat', temporary), undefined);
   }
   return {menuItem, migrate, activityDay};
-})();
+}

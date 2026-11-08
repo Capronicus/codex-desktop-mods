@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Install, launch or remove the local Codex sidebar colour mod for Linux."""
 import argparse
+from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -24,9 +26,9 @@ STOCK_DESKTOP = Path('/usr/share/applications/chatgpt.desktop')
 MARKER = 'X-Codex-Sidebar-Colours=true'
 ASSET = 'app-primary-f921a74f3eba.js'
 ORIGINAL_HASH = '43c553113064956188f435bd0ce433aa46dad054aeb8e9919c2495b0482182a0'
-VERSION = '26.1027.51404'
 MOD_FILES = ('sidebar-colours.py', 'sidebar-colours.js', 'chat-details-main.cjs',
-             'chat-details-preload.cjs', 'chat-details.js', 'chat-details-cloud.js')
+             'chat-details-preload.cjs', 'chat-details.js', 'chat-details-cloud.js',
+             'renderer_updates.py', 'renderer-modules.json')
 TRANSCRIPT = 'virtualized-turn-list-849fe48ea6b5.js'
 CLOUD_TRANSCRIPT = 'chatgpt-conversation-turn-content-48014b7b6a96.js'
 
@@ -95,7 +97,15 @@ def modify(js):
                '{id:C,message:w,icon:T,onSelect:E},')
     # Module declarations/imports remain at top level. The code runs before the
     # first call of an exported lazy component, independently of load order.
-    return (SOURCE / 'sidebar-colours.js').read_text() + '\n' + js
+    bindings = """import {
+      $Bn as sidebarColourLocalProjects, zcr as initializePreferences, $cr as preferencesReady,
+      Lcr as getPreference, qcr as setPreference, Rcr as preferenceKeys, Qcr as watchPreferencePrefix,
+    } from './app-initial-fdea07eb2719.js';"""
+    init = """initializePreferences();
+      const sidebarColours = createSidebarColours({
+        preferencesReady, getPreference, setPreference, preferenceKeys, watchPreferencePrefix
+      });"""
+    return '\n'.join([bindings, (SOURCE / 'sidebar-colours.js').read_text(), init, js])
 
 
 def signature():
@@ -121,30 +131,62 @@ def patch_archive(destination):
         data_start = 8 + pickle_size
         end = src.seek(0, os.SEEK_END)
         additions = []
-        for name, directory, expected, extension in [
+        legacy = [
             (ASSET, assets, ORIGINAL_HASH, None),
             (TRANSCRIPT, assets, 'c3d825dfdf4b36bd83dd56a7948ef4f0807f325b0de60763acca9af8eafe4426', 'chat-details.js'),
             (CLOUD_TRANSCRIPT, assets, 'fbe067e82f77aa9026e2badb1992111faebda490bbe4beb867096b0370ca5fee', 'chat-details-cloud.js'),
             ('early-bootstrap.js', desktop, '466efbe496786705721ae93dd7cd2be7c08d0f760d53adf984dfde77af93fecf', 'chat-details-main.cjs'),
             ('preload.js', desktop, 'aa8be920fd14a9b98eca16c91d97a55105b196698fda36d5063e966620a0c54a', 'chat-details-preload.cjs'),
-        ]:
-            entry = directory[name]
+        ]
+        def legacy_patches():
+            for name, directory, expected, extension in legacy:
+                entry = directory[name]
+                src.seek(data_start + int(entry['offset']))
+                original = src.read(entry['size'])
+                if digest(original) != expected:
+                    raise ValueError(f'Incompatible desktop asset: {name}')
+                js = original.decode()
+                if name == ASSET:
+                    js = modify(js)
+                elif name == TRANSCRIPT:
+                    js = subst(js, '"data-turn-key":p,children:x', '"data-turn-key":p,children:withChatDetails(i,x,L,ke)')
+                elif name == CLOUD_TRANSCRIPT:
+                    js = subst(js, 'function aP(e){let t=(0,wP.c)(496)', 'function aP(e){let t=(0,wP.c)(497)')
+                    js = subst(js, 't[4]!==y||t[5]!==k?(we=e=>(0,$.jsx)(yC,{item:k,index:y,children:e}),t[4]=y',
+                               't[496]!==f||t[4]!==y||t[5]!==k?(we=e=>(0,$.jsx)(yC,{item:k,index:y,children:withCloudChatTime(e,k,f)}),t[496]=f,t[4]=y')
+                if extension:
+                    js += '\n' + (SOURCE / extension).read_text()
+                yield entry, js.encode()
+
+        def read(entry):
+            if entry.get('unpacked') or 'offset' not in entry:
+                raise ValueError('Expected a packed app component')
             src.seek(data_start + int(entry['offset']))
-            original = src.read(entry['size'])
-            if digest(original) != expected:
-                raise ValueError(f'Incompatible desktop asset: {name}')
-            js = original.decode()
-            if name == ASSET:
-                js = modify(js)
-            elif name == TRANSCRIPT:
-                js = subst(js, '"data-turn-key":p,children:x', '"data-turn-key":p,children:withChatDetails(i,x,L,ke)')
-            elif name == CLOUD_TRANSCRIPT:
-                js = subst(js, 'function aP(e){let t=(0,wP.c)(496)', 'function aP(e){let t=(0,wP.c)(497)')
-                js = subst(js, 't[4]!==y||t[5]!==k?(we=e=>(0,$.jsx)(yC,{item:k,index:y,children:e}),t[4]=y',
-                           't[496]!==f||t[4]!==y||t[5]!==k?(we=e=>(0,$.jsx)(yC,{item:k,index:y,children:withCloudChatTime(e,k,f)}),t[496]=f,t[4]=y')
-            if extension:
-                js += '\n' + (SOURCE / extension).read_text()
-            patched = js.encode()
+            data = src.read(entry['size'])
+            if len(data) != entry['size']:
+                raise ValueError('Incomplete desktop archive')
+            return data
+
+        def updated_patches():
+            from renderer_updates import renderer_patches
+            package = json.loads(read(tree['files']['package.json']))
+            if (package.get('name'), package.get('main')) != ('openai-codex-electron', '.vite/build/early-bootstrap.js'):
+                raise ValueError('Unrecognised desktop entry point')
+            # These two bridges append independent Electron code. Check the native
+            # entry points before adding the read-only IPC handler to the new app.
+            for name, extension, anchors in [
+                ('preload.js','chat-details-preload.cjs',(b'require("electron")',b'contextBridge.exposeInMainWorld')),
+                ('early-bootstrap.js','chat-details-main.cjs',(b'require("electron")',b'app.whenReady')),
+            ]:
+                entry = desktop[name]
+                data = read(entry)
+                if not all(a in data for a in anchors):
+                    raise ValueError('Unrecognised desktop entry point '+name)
+                yield entry, data + b'\n' + (SOURCE/extension).read_bytes()
+            yield from renderer_patches(assets['async']['files'], read, SOURCE)
+
+        patches = legacy_patches() if ASSET in assets else updated_patches()
+        for entry, patched in patches:
             block = entry['integrity']['blockSize']
             entry.update(offset=str(end - data_start), size=len(patched))
             entry['integrity'].update(hash=digest(patched), blocks=[
@@ -176,45 +218,89 @@ def desktop_text():
     return subst(text, old, f'Exec=/usr/bin/python3 {qt_arg(INSTALL / "sidebar-colours.py")} launch %U\n{MARKER}')
 
 
-def app_build():
-    return json.loads((SYSTEM / 'resources/linux-package-metadata.json').read_text()).get('version')
+def valid_runtime(target):
+    return ((target / 'ChatGPT').is_file() and os.access(target / 'ChatGPT', os.X_OK)
+            and (target / 'resources/app.asar').is_file())
+
+
+def revision_for(before):
+    return digest(b''.join((SOURCE / name).read_bytes() for name in MOD_FILES)
+                  + repr(before).encode())[:16]
+
+
+def runtime_for(before):
+    CACHE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    revision = revision_for(before)
+    # A unique directory lets an already-running instance finish using its files.
+    for target in sorted(CACHE.glob('runtime-' + revision + '-*')):
+        if valid_runtime(target):
+            return target
+    with tempfile.TemporaryDirectory(dir=CACHE) as tmp:
+        stage = Path(tmp) / 'app'
+        stage.mkdir()
+        resources = stage / 'resources'
+        resources.mkdir()
+        for item in SYSTEM.iterdir():
+            dest = stage / item.name
+            if item.name == 'ChatGPT':
+                shutil.copy2(item, dest)
+            elif item.name != 'resources':
+                dest.symlink_to(item)
+        for item in (SYSTEM / 'resources').iterdir():
+            if item.name != 'app.asar':
+                (resources / item.name).symlink_to(item)
+        patch_archive(resources / 'app.asar')
+        if before != signature():
+            raise ValueError('The desktop package changed while rebuilding the mods. Try again after the update finishes.')
+        target = CACHE / ('runtime-' + revision + '-' + Path(tmp).name)
+        stage.rename(target)
+    return target
+
+
+def prune_runtimes(keep):
+    # A desktop process may still be using an older cache after a package update.
+    # Only consider directories created by this generation of the launcher.
+    candidates = {p for p in CACHE.glob('runtime-*-tmp*')
+                  if re.fullmatch(r'runtime-[0-9a-f]{16}-tmp[0-9a-z_]+', p.name)
+                  and p.is_dir() and not p.is_symlink() and p not in keep}
+    if not candidates:
+        return
+    try:
+        for process in Path('/proc').iterdir():
+            if not process.name.isdecimal():
+                continue
+            try:
+                if process.stat().st_uid == os.getuid():
+                    candidates.discard((process / 'exe').readlink().parent)
+            except FileNotFoundError:
+                continue
+            except PermissionError:
+                # Some Linux hosts hide process paths. Leave caches available.
+                return
+    except OSError:
+        return
+    for path in candidates:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def save_runtime(target, before):
+    previous = read_state('runtime.json').get('path')
+    atomic_write(INSTALL / 'runtime.json', json.dumps({'path': str(target), 'system': before}).encode())
+    (INSTALL / 'unsupported.json').unlink(missing_ok=True)
+    prune_runtimes({target, Path(previous) if isinstance(previous, str) else None})
 
 
 def install():
     desktop = desktop_text()
     if DESKTOP.exists() and MARKER not in DESKTOP.read_text().splitlines():
         raise ValueError(f'An existing personal launcher already uses {DESKTOP}. It has been preserved.')
-    if app_build() != VERSION:
-        raise ValueError(f'This mod supports desktop {VERSION}. Installed version is {app_build()}.')
     before = signature()
-    CACHE.mkdir(mode=0o700, parents=True, exist_ok=True)
-    revision = digest(b''.join((SOURCE / name).read_bytes() for name in MOD_FILES)
-                      + repr(before).encode())[:16]
-    target = CACHE / ('runtime-' + revision)
-    if not target.is_dir():
-        with tempfile.TemporaryDirectory(dir=CACHE) as tmp:
-            stage = Path(tmp) / 'app'
-            stage.mkdir()
-            resources = stage / 'resources'
-            resources.mkdir()
-            for item in SYSTEM.iterdir():
-                dest = stage / item.name
-                if item.name == 'ChatGPT':
-                    shutil.copy2(item, dest)
-                elif item.name != 'resources':
-                    dest.symlink_to(item)
-            for item in (SYSTEM / 'resources').iterdir():
-                if item.name != 'app.asar':
-                    (resources / item.name).symlink_to(item)
-            patch_archive(resources / 'app.asar')
-            if before != signature():
-                raise ValueError('The app was updated during installation. Run the installer again.')
-            stage.rename(target)
+    target = runtime_for(before)
     INSTALL.mkdir(mode=0o700, parents=True, exist_ok=True)
     for name in MOD_FILES:
         if (SOURCE / name).resolve() != (INSTALL / name).resolve():
             atomic_write(INSTALL / name, (SOURCE / name).read_bytes())
-    atomic_write(INSTALL / 'runtime.json', json.dumps({'path': str(target), 'system': before}).encode())
+    save_runtime(target, before)
     DESKTOP.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(DESKTOP, desktop.encode())
     print('Installed. Fully quit ChatGPT, then open ChatGPT from the applications menu.')
@@ -230,16 +316,45 @@ def atomic_write(path, content):
         Path(tmp).unlink(missing_ok=True)
 
 
-def launch(args):
-    meta = json.loads((INSTALL / 'runtime.json').read_text())
-    runtime = Path(meta['path'])
-    exe = runtime / 'ChatGPT'
-    if signature() != meta['system'] or not exe.is_file():
-        warn = 'The desktop app changed or the colour mod cache was removed. Opening the installed app. Reinstall a compatible sidebar colour mod to restore colours.'
-        if shutil.which('notify-send'):
-            subprocess.run(['notify-send', 'Codex sidebar colours', warn], check=False)
-        print(warn, file=sys.stderr)
-        os.execv(SYSTEM / 'ChatGPT', ['ChatGPT', *args])
+@contextmanager
+def locked():
+    lock_dir = Path(os.environ.get('XDG_RUNTIME_DIR') or '/tmp')
+    with (lock_dir / f'codex-sidebar-colours-{os.getuid()}.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def read_state(name):
+    try:
+        meta = json.loads((INSTALL / name).read_text())
+        return meta if isinstance(meta, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def launch_runtime():
+    before = signature()
+    meta = read_state('runtime.json')
+    if meta.get('system') == before and isinstance(meta.get('path'), str):
+        target = Path(meta['path'])
+        if target.parent == CACHE and valid_runtime(target):
+            return target
+    revision = revision_for(before)
+    previous = read_state('unsupported.json')
+    if previous.get('revision') == revision:
+        raise ValueError(previous['reason'])
+    try:
+        target = runtime_for(before)
+    except (ValueError, KeyError, struct.error) as error:
+        if signature() == before:
+            atomic_write(INSTALL / 'unsupported.json',
+                         json.dumps({'revision': revision, 'reason': str(error)}).encode())
+        raise
+    save_runtime(target, before)
+    return target
+
+
+def exec_runtime(exe, args):
     # Ubuntu's AppArmor grants user namespaces by executable path. On hosts where
     # a copied executable lacks that grant, Chromium can use a system-owned SUID
     # sandbox helper. This is a standard Chromium sandbox, never a sandbox bypass.
@@ -251,6 +366,25 @@ def launch(args):
                 os.environ['CHROME_DEVEL_SANDBOX'] = str(path)
                 break
     os.execv(exe, [str(exe), *args])
+
+
+def launch(args):
+    try:
+        with locked():
+            # flock's descriptor is close-on-exec. Another rebuild can safely
+            # inspect /proc once the selected executable has started.
+            exec_runtime(launch_runtime() / 'ChatGPT', args)
+    except (OSError, ValueError, KeyError, struct.error, ImportError) as error:
+        warn = f'Opening the system app. The mods could not be applied: {error}'
+        print(warn, file=sys.stderr)
+        if shutil.which('notify-send'):
+            try:
+                subprocess.Popen(['notify-send', 'Codex desktop mods', warn],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError:
+                pass
+        os.execv(SYSTEM / 'ChatGPT', ['ChatGPT', *args])
+
 
 
 def uninstall():
@@ -271,9 +405,7 @@ def main():
     else:
         if extra:
             parser.error('Unexpected arguments')
-        lock_dir = Path(os.environ.get('XDG_RUNTIME_DIR') or '/tmp')
-        with (lock_dir / f'codex-sidebar-colours-{os.getuid()}.lock').open('a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+        with locked():
             (install if args.operation == 'install' else uninstall)()
 
 
