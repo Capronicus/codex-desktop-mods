@@ -28,6 +28,7 @@ jobs:
         shell: pwsh
         run: |
           $env:CODEX_HOME = Join-Path $env:RUNNER_TEMP 'organizer-profile'
+          New-Item -ItemType Directory -Path $env:CODEX_HOME -Force | Out-Null
           $package = Get-AppxPackage -Name OpenAI.Codex
           $codex = Join-Path $package.InstallLocation 'app/resources/codex.exe'
           & $codex plugin marketplace add $env:GITHUB_WORKSPACE
