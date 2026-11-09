@@ -17,6 +17,8 @@ def main():
     setup.add_argument("--automatic", action="store_true")
     sub.add_parser("sync")
     sub.add_parser("sync-colours")
+    sub.add_parser("sync-settings")
+    sub.add_parser("settings").add_argument("mode", choices=("on", "off"))
     sub.add_parser("disable")
     sub.add_parser("watch")
     sub.add_parser("sidebar").add_argument("mode", choices=("on", "off"))
@@ -46,7 +48,7 @@ def main():
     try:
         if args.command == "setup":
             result = sync.setup(args.folder, args.automatic)
-        elif args.command in ("sidebar", "colours", "order"):
+        elif args.command in ("sidebar", "colours", "order", "settings"):
             result = sync.set_exchange_option(args.command, args.mode == "on")
         elif args.command == "local-only":
             result = projects.set_private(args.kind, args.ident, args.mode == "on")
@@ -90,6 +92,8 @@ def main():
             result = sync.keep_branch(args.thread, args.device)
         elif args.command == "adopt":
             result = sync.adopt_history(args.thread, args.device)
+        elif args.command == "sync-settings":
+            result = sync.sync_settings_now()
         elif args.command == "sync-colours":
             result = sync.sync_colours_now()
         elif args.command == "sync":

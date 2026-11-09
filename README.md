@@ -30,6 +30,8 @@ Refresh **Capronicus Desktop Mods** in Plugin Explorer on each desktop and insta
 
 With Desktop Mods and Chat Sync installed on both computers, ask each desktop to **enable colour sync and sync my colours now**. This exchanges chat, project and section colours, saved swatches and group overrides using the configured private folder.
 
+Chat Sync 0.5.0 can also sync appearance and chat preferences, including themes, fonts, composer behaviour and chat detail level. [Set up settings sync](plugins/chat-sync/README.md#sync-appearance-and-chat-preferences).
+
 Chat Sync 0.3.0 also offers **Enable sidebar sync**. Enable it on each participating desktop to exchange local project and custom section names and the project and section of each synced Codex chat. Choose a project folder separately on each computer.
 
 Chat Sync 0.4.0 adds explicit project linking to local checkouts, per-chat delivery receipts, local-only rules for projects and chats, sidebar merge previews and undo, and an optional shared pin order and project/section order. Desktop Mods 0.7.0 shows the origin device and receipt status when you hover over a local chat title.

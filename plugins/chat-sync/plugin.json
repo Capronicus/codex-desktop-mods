@@ -1,14 +1,14 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "chat-sync",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Sync local Codex chat histories across desktop profiles.",
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "Codex Chat Sync",
         "shortDescription": "Sync local desktop chats",
-        "longDescription": "Exchange Codex conversations through a private folder, with optional sidebar organization and colours.",
+        "longDescription": "Exchange Codex conversations through a private folder, with optional appearance and chat preferences, sidebar organization and colours.",
         "category": "Productivity",
         "capabilities": [
           "Read",

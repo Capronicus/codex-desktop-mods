@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 
 from native_fixture import App, prepare, ROOT
 
@@ -71,6 +72,44 @@ def placement(app, tid, project, section):
     assert (thread["section"] or {}).get("id") == section, (thread["section"], section)
 
 
+def settings_fixture(app, call, stage, vault, home):
+    def write(values):
+        app.call("config/batchWrite", {"edits": [
+            {"keyPath":"desktop." + key, "value":value, "mergeStrategy":"replace"}
+            for key, value in values.items()
+        ]})
+
+    private_value = "DEVICE-ONLY-FIXTURE-" + stage
+    write({"audioOutputDeviceId":private_value})
+    dark = {"accent":"#d95130", "accentSource":"custom", "contrast":62, "opaqueWindows":False,
+            "ink":"#ffffff", "surface":"#111111", "fonts":{"ui":"Example Sans","code":"Example Mono"},
+            "semanticColors":{"skill":"#aa22ff","diffAdded":"#00aabb","diffRemoved":"#770022"}}
+    if stage == "seed":
+        write({"appearanceTheme":"dark", "appearanceDarkChromeTheme":dark, "composerEnterBehavior":"cmdAlways"})
+    elif stage == "reply":
+        write({"appearanceTheme":"light", "pagesFontSize":16})
+    assert call("chat_sync_status")["settings"] is False
+    assert call("set_settings_sync", enabled=True)["settings"] is True
+    result = call("sync_settings_now")
+    assert not result["deferred_devices"] and not result["skipped_local"], result
+    def desktop():
+        layer = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+        assert layer["model"]=="offline-test"
+        assert layer["desktop"]["audioOutputDeviceId"]==private_value
+        return layer["desktop"]
+    local = desktop()
+    assert local["appearanceTheme"]=="dark" and local["appearanceDarkChromeTheme"]==dark
+    assert local["composerEnterBehavior"]=="cmdAlways"
+    for head in (vault/"codex-chat-sync-v1/settings-v1").glob("*.json"):
+        rows=json.loads(head.read_bytes())["rows"]
+        assert "audioOutputDeviceId" not in rows and "model" not in rows and "DEVICE-ONLY" not in head.read_text()
+    if stage=="reply":
+        assert local["pagesFontSize"]==16
+        write({"appearanceTheme":"light","composerEnterBehavior":None})
+        call("sync_settings_now")
+    return desktop
+
+
 def exercise(stage, vault, incoming, home):
     cli = os.environ.get("CODEX_CHAT_SYNC_CLI", "codex")
     subprocess.run([cli, "plugin", "marketplace", "add", str(REPO)], check=True)
@@ -89,6 +128,7 @@ def exercise(stage, vault, incoming, home):
             start(app)
             sync(call)
             assert not (vault / "codex-chat-sync-v1/sidebar-v1").exists()
+        desktop = settings_fixture(app, call, stage, vault, home)
         assert call("set_sidebar_sync", enabled=True)["sidebar"] is True
         if stage == "seed":
             tid = start(app)
@@ -153,6 +193,12 @@ def exercise(stage, vault, incoming, home):
         shutil.copytree(incoming, vault, dirs_exist_ok=True)
         result = sync(call)
         assert result["busy"] >= 1 and result["updated"] == 0, result
+        assert result["settings"]["applied"] == 3, result["settings"]
+        values = desktop()
+        assert values["appearanceTheme"]=="light" and values["pagesFontSize"]==16
+        assert "composerEnterBehavior" not in values
+        assert call("sync_settings_now")["applied"] == 0
+        assert call("set_settings_sync", enabled=False)["settings"] is False
     with closing(App(home)) as app:
         call = plugin(app)
         assert sync(call)["updated"] == 1

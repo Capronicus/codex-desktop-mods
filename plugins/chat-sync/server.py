@@ -79,6 +79,12 @@ TOOLS = [
         "Opt in or out of local chat pins and sidebar ordering on this device.",
         {"enabled": {"type": "boolean"}},
     ),
+    tool(
+        "set_settings_sync",
+        "Enable or disable syncing desktop appearance and chat preferences through this device’s configured private folder.",
+        {"enabled": {"type": "boolean"}},
+    ),
+    tool("sync_settings_now", "Exchange only supported desktop appearance and chat preferences."),
     tool("chat_sync_status", "Show local configuration and the last sync result.", readonly=True),
     tool(
         "configure_chat_sync",
@@ -129,6 +135,8 @@ ACTIONS = {
     "undo_sidebar_sync": batches.undo,
     "set_pin_order_sync": lambda enabled: sync.set_exchange_option("order", enabled),
     "chat_sync_status": sync.status,
+    "set_settings_sync": lambda enabled: sync.set_exchange_option("settings", enabled),
+    "sync_settings_now": sync.sync_settings_now,
     "configure_chat_sync": sync.setup,
     "sync_chats": sync.run,
     "sync_colours_now": sync.sync_colours_now,
@@ -162,7 +170,7 @@ def handle(req):
         version = params.get("protocolVersion")
         return {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[0],
-            "serverInfo": {"name": "chat-sync", "version": "0.4.0"},
+            "serverInfo": {"name": "chat-sync", "version": "0.5.0"},
             "capabilities": {"tools": {}},
         }
     if method == "ping":

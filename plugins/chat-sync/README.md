@@ -45,6 +45,14 @@ Ask **“Sync my pins and sidebar order”** on each participating desktop after
 
 The equivalent commands in the plugin directory are `python3 sync.py projects`, `link LOCAL_ID SHARED_ID FOLDER`, `name "Windows PC"`, `receipt CHAT_ID`, `local-only chat|project ID on|off`, `preview`, `apply-preview BATCH_ID`, `undo` and `order on|off`. Use `py sync.py` on Windows.
 
+## Sync appearance and chat preferences
+
+With Chat Sync 0.5.0 or later, configure the same private folder on both desktops. On the desktop whose settings you want to start with, ask **“Enable settings sync and sync my settings now.”** Wait for your folder service to deliver the settings file, then repeat on the other desktop. Existing shared settings apply on first join. A preference set only on the joining desktop is added to the folder. Fully quit and reopen Codex if an open window still shows its previous settings.
+
+Supported appearance settings include light/dark mode, custom light and dark colours and font choices, code themes, UI/code/Page font sizes, pointer and font smoothing preferences, and reduced motion. Chat preferences include Enter to send, plain-text composition, follow-up handling, chat detail level, inline or detached reviews, context usage display, project chats in Recents, completion notifications and notification dots. A font must be installed on a computer to render there. Model selection, reasoning, permissions, credentials and device paths stay local.
+
+Automatic chat sync includes these preferences when enabled. For a settings-only pass use `python3 sync.py sync-settings`; toggle the feature with `python3 sync.py settings on` or `settings off`. Settings sync starts off on each desktop. Edits merge per preference, including resets to defaults. Concurrent edits to one preference use its revision and the device ID to break ties.
+
 ## Sync sidebar colours
 
 Apply **Codex Desktop Mods 0.7.0** and install **Chat Sync 0.4.0** or later on each computer. After configuring the same private folder, ask **Enable colour sync and sync my colours now** on each device. This exchanges colour preferences immediately, including existing saved swatches. From the CLI, use `python3 sync.py colours on` and `python3 sync.py sync-colours`. Use `colours off` to disable it. Colour sharing starts off on existing and new installations.

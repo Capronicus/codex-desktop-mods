@@ -132,6 +132,7 @@ def status():
         "device": cfg and cfg["device"],
         "automatic": bool(cfg and cfg["automatic"]),
         "colours": bool(cfg and cfg.get("colours")),
+        "settings": bool(cfg and cfg.get("settings")),
         "sidebar": bool(cfg and cfg.get("sidebar")),
         "order": bool(cfg and cfg.get("order")),
         "device_name": cfg and cfg.get("device_name"),
@@ -144,7 +145,7 @@ def status():
 
 
 def set_exchange_option(option, enabled):
-    if option not in ("colours", "sidebar", "order") or type(enabled) is not bool:
+    if option not in ("colours", "sidebar", "order", "settings") or type(enabled) is not bool:
         raise ValueError("Unknown sync option")
     with lock(STATE / "sync.lock"):
         cfg = read_json(CONFIG)
@@ -161,6 +162,19 @@ def set_exchange_option(option, enabled):
         cfg[option] = enabled
         atomic(CONFIG, encode(cfg))
     return status()
+
+
+def sync_settings_now():
+    import settings
+    import projects
+
+    with lock(STATE / "sync.lock"):
+        cfg, vault = projects.config()
+        if not cfg.get("settings"):
+            raise ValueError("Enable appearance and chat settings sync on this desktop first.")
+        if not vault.is_dir():
+            raise ValueError("Sync folder unavailable. Check the mount or desktop sync client.")
+        return settings.exchange(HOME, vault, cfg["device"])
 
 
 def sync_colours_now():
@@ -802,6 +816,13 @@ def run(automatic=False):
                 )
             except (OSError, ValueError, sqlite3.Error) as exc:
                 stats["colours"] = {"error": str(exc)}
+        if cfg.get("settings"):
+            import settings
+
+            try:
+                stats["settings"] = settings.exchange(HOME, vault, device)
+            except (OSError, EOFError, ValueError, subprocess.SubprocessError) as exc:
+                stats["settings"] = {"error": str(exc)}
         atomic(STATE / "last.json", encode(stats))
         return stats
 
