@@ -3,6 +3,8 @@
 import json
 import os
 import shutil
+import sqlite3
+from contextlib import closing
 import subprocess
 from pathlib import Path
 
@@ -54,7 +56,7 @@ def codex_executable():
     return next((p for p in candidates if p and Path(p).is_file()), None)
 
 
-def apply_names(names):
+def apply_through_api(names, home):
     exe = codex_executable()
     if not exe:
         return []
@@ -71,6 +73,7 @@ def apply_names(names):
         stderr=subprocess.DEVNULL,
         text=True,
         encoding="utf-8",
+        env={**os.environ, "CODEX_HOME": str(home)},
     )
     import threading
 
@@ -99,10 +102,30 @@ def apply_names(names):
         pass
     finally:
         deadline.cancel()
+        proc.stdin.close()
+        proc.stdout.close()
         proc.terminate()
         try:
             proc.wait(3)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+    return done
+
+
+def apply_names(names, home):
+    try:
+        done = apply_through_api(names, home)
+    except (OSError, subprocess.SubprocessError):
+        done = []
+    # A Store profile may be indexed by the running desktop before a separate
+    # app-server can address the chat. Update only an existing native title row.
+    pending = names.keys() - set(done)
+    if pending:
+        database = (home / "state_5.sqlite").as_uri() + "?mode=rw"
+        with closing(sqlite3.connect(database, uri=True, timeout=2)) as db, db:
+            for tid in pending:
+                changed = db.execute("UPDATE threads SET name=? WHERE id=?", (names[tid], tid))
+                if changed.rowcount == 1:
+                    done.append(tid)
     return done

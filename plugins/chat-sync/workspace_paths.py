@@ -40,9 +40,12 @@ def local_record(raw, fallback, known_dirs):
     if raw.startswith(PREFIX):
         raise ValueError("Unexpected local workspace marker in shared history")
     record = json.loads(raw)
+    if not isinstance(record, dict) or MARK in record:
+        raise ValueError("Invalid shared history record")
     target = fields(record)
     if not isinstance(target, dict):
         return raw
+
     def available(value):
         if not isinstance(value, str):
             return False

@@ -618,7 +618,7 @@ def run(automatic=False):
         if pending:
             from native_names import apply_names
 
-            for tid in apply_names(pending):
+            for tid in apply_names(pending, HOME):
                 state[tid].pop("pending_name", None)
             atomic(state_path, encode(state))
         stats["pending_names"] = sum(bool(s.get("pending_name")) for s in state.values())
