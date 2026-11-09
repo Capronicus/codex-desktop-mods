@@ -1,5 +1,6 @@
 """Round-trip real desktop layout records separately from native app-server fixtures."""
 
+from contextlib import closing
 import json
 import os
 import shutil
@@ -96,7 +97,7 @@ class DesktopSidebar(unittest.TestCase):
                     }
                 ),
             )
-            with sqlite3.connect(home / "state_5.sqlite") as db:
+            with closing(sqlite3.connect(home / "state_5.sqlite")) as db, db:
                 db.executescript("""
                     CREATE TABLE projects(id TEXT, name TEXT, metadata TEXT);
                     CREATE TABLE thread_sections(id TEXT, name TEXT, appearance TEXT);
