@@ -128,6 +128,7 @@ def status():
         "automatic": bool(cfg and cfg["automatic"]),
         "colours": bool(cfg and cfg.get("colours")),
         "sidebar": bool(cfg and cfg.get("sidebar")),
+        "sidebar_layout_pending": bool(cfg and cfg.get("sidebar") and (STATE / "sidebar-layout-pending.json").is_file()),
         "last_run": read_json(STATE / "last.json"),
     }
 
@@ -149,6 +150,7 @@ def set_exchange_option(option, enabled):
 def disable():
     with lock(STATE / "sync.lock"):
         CONFIG.unlink(missing_ok=True)
+        (STATE / "sidebar-layout-pending.json").unlink(missing_ok=True)
     return {"configured": False}
 
 

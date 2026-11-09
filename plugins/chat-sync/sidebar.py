@@ -262,6 +262,8 @@ def exchange(home, vault, device, eligible, atomic, encode):
                 continue
             target = record[2]
             group = PLACEMENT[kind] + "/" + str(target)
+            if layout.enabled and kind == "chat-project" and key not in current and tid in eligible:
+                continue
             if kind == "chat-section" and (tid in pinned or not section_access):
                 continue
             if group in hidden or native.get(key, MISSING) == target:

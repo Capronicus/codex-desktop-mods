@@ -1,6 +1,10 @@
 """Round-trip real desktop layout records separately from native app-server fixtures."""
 
 import json
+import os
+import shutil
+import subprocess
+import time
 from pathlib import Path
 import sqlite3
 import sys
@@ -20,6 +24,56 @@ def ident():
 
 
 class DesktopSidebar(unittest.TestCase):
+    def test_helper_waits_for_desktop_exit(self):
+        if desktop_layout.desktop_running():
+            self.skipTest("This OS user already has a desktop running")
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            home = root / "profile"
+            plugin = home / "chat-sync"
+            plugin.mkdir(parents=True)
+            device, project, native = ident(), ident(), ident()
+            state_path = home / ".codex-global-state.json"
+            sync.atomic(state_path, sync.encode({"local-projects": {}}))
+            sync.atomic(plugin / "config.json", sync.encode({"device": device, "sidebar": True}))
+            sync.atomic(plugin / ("sidebar-" + device + ".json"), sync.encode({"seen": {}}))
+            if os.name == "nt":
+                binary = root / "ChatGPT.exe"
+                shutil.copy2(Path(os.environ["SystemRoot"]) / "System32/ping.exe", binary)
+                args = [str(binary), "-t", "127.0.0.1"]
+            else:
+                args = [
+                    sys.executable,
+                    "-c",
+                    "import ctypes,time; ctypes.CDLL(None).prctl(15,b'ChatGPT',0,0,0); time.sleep(60)",
+                ]
+            with subprocess.Popen(args, stdout=subprocess.DEVNULL) as owner:
+                try:
+                    for _ in range(40):
+                        if desktop_layout.desktop_running():
+                            break
+                        time.sleep(0.05)
+                    self.assertTrue(desktop_layout.desktop_running())
+                    self.assertTrue(
+                        desktop_layout.queue(
+                            home,
+                            device,
+                            desktop_layout.Layout(home),
+                            {"project/" + project: [None, "On exit", native]},
+                        )
+                    )
+                    self.assertEqual(sync.read_json(state_path)["local-projects"], {})
+                finally:
+                    owner.terminate()
+            for _ in range(100):
+                if not (plugin / desktop_layout.QUEUE).exists():
+                    break
+                time.sleep(0.1)
+            self.assertFalse((plugin / desktop_layout.QUEUE).exists())
+            self.assertEqual(
+                sync.read_json(state_path)["local-projects"][project]["name"], "On exit"
+            )
+
     def test_offline_projection_and_concurrent_edits(self):
         with TemporaryDirectory() as temp:
             root = Path(temp)

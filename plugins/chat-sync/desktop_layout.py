@@ -145,7 +145,7 @@ class Layout:
         return applied
 
 
-def desktop_pid(home):
+def desktop_pid():
     # Electron owns its cached global state while open. Check again immediately
     # before replacement. Headless Codex app-server processes do not own this file.
     if os.name == "nt":
@@ -178,12 +178,7 @@ def desktop_pid(home):
             # Zombie processes have already released their files.
             if (proc / "stat").read_text().rsplit(")", 1)[1].split()[0] == "Z":
                 continue
-            env = dict(
-                v.split(b"=", 1) for v in (proc / "environ").read_bytes().split(b"\0") if b"=" in v
-            )
-            profile = env.get(b"CODEX_HOME") or os.path.join(env.get(b"HOME", b""), b".codex")
-            if not os.path.isabs(profile) or Path(os.fsdecode(profile)).resolve() == home:
-                return int(proc.name)
+            return int(proc.name)
         except (FileNotFoundError, ProcessLookupError):
             continue
         except PermissionError:
@@ -191,8 +186,8 @@ def desktop_pid(home):
     return None
 
 
-def desktop_running(home):
-    return desktop_pid(home) is not None
+def desktop_running():
+    return desktop_pid() is not None
 
 
 def wait_for_exit(pid):
@@ -240,13 +235,13 @@ def apply_pending(home):
     if not cfg.get("sidebar") or cfg["device"] != plan["device"]:
         path.unlink(missing_ok=True)
         return True
-    if desktop_running(home):
+    if desktop_running():
         return False
     layout = Layout(home)
     if not layout.enabled or layout.account != plan["account"]:
         return False
     acknowledged = layout.apply(plan["changes"])
-    if layout.path.read_bytes() != layout.original or desktop_running(home):
+    if layout.path.read_bytes() != layout.original or desktop_running():
         return False
     updated = layout.observed({k.split("/")[1] for k in acknowledged if k.startswith("chat-")})
     if any(updated.get(k) != v for k, v in acknowledged.items()):
@@ -254,7 +249,7 @@ def apply_pending(home):
     if acknowledged:
         if layout.data != json.loads(layout.original):
             sync.atomic(directory / "sidebar-layout-backup.json", layout.original)
-            if layout.path.read_bytes() != layout.original or desktop_running(home):
+            if layout.path.read_bytes() != layout.original or desktop_running():
                 return False
             sync.atomic(layout.path, sync.encode(layout.data))
         state_path = directory / ("sidebar-" + cfg["device"] + ".json")
@@ -304,17 +299,18 @@ def finish_on_exit(home):
             cfg = sync.read_json(directory / "config.json", {})
             if not cfg.get("sidebar"):
                 return
-            pid = desktop_pid(home)
+            pid = desktop_pid()
             if pid is not None:
                 wait_for_exit(pid)
                 continue
-            else:
-                try:
-                    with sync.lock(directory / "sync.lock"):
-                        apply_pending(home)
-                    return
-                except sync.Busy:
-                    pass
+            try:
+                with sync.lock(directory / "sync.lock"):
+                    if apply_pending(home):
+                        return
+                    if sync.read_json(directory / QUEUE, {}).get("account") != Layout(home).account:
+                        return
+            except sync.Busy:
+                pass
             time.sleep(1.5)
 
 
