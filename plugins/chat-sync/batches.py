@@ -25,7 +25,7 @@ def summarize(changes):
     return {"id": sync.digest(sync.encode(changes)), "counts": totals, "changes": details}
 
 
-def begin(home, device, review, changes, native):
+def begin(home, device, review, changes, native, pinned, rows):
     if not changes:
         return
     p = home / "chat-sync" / JOURNAL
@@ -35,7 +35,18 @@ def begin(home, device, review, changes, native):
     # Consecutive passes before quit form one visible batch.
     pending = (home / "chat-sync" / "sidebar-layout-pending.json").exists()
     undo = old if pending and old.get("device") == device else {"device": device, "native": {}}
-    for key, (before, after) in changes.items():
+    targets = {k: v[1] for k, v in changes.items()}
+    # Codex uses a single native section field for a custom section or a pin.
+    # The renderer can display both independently. Journal the native placement as a pair.
+    for tid in {k.split("/")[1] for k in changes if k.startswith(("chat-section/", "chat-pin/"))}:
+        pin = "chat-pin/" + tid
+        section = "chat-section/" + tid
+        native[pin] = tid in pinned
+        targets[pin] = rows.get(pin, [0, None, native[pin]])[2]
+        targets[section] = (
+            None if targets[pin] else rows.get(section, [0, None, native.get(section)])[2]
+        )
+    for key, after in targets.items():
         if key.startswith("order/"):
             continue
         original = undo["native"].get(key, [native.get(key)])[0]
@@ -114,7 +125,12 @@ def undo_locked(home, cfg):
             tids = {r[0] for r in db.execute("select id from threads")}
         groups, values, pins = sidebar.catalogue(home, aliases, tids, {}, layout)
         values.update({"chat-pin/" + t: t in pins for t in tids})
+        renderer = layout.observed(tids)
         for key, (before, after) in original.items():
+            if before and key.startswith(("chat-project/", "chat-section/")):
+                group = key.split("/")[0].removeprefix("chat-") + "/" + before
+                if group not in groups:
+                    raise ValueError("The chat’s former group was removed. Undo was skipped.")
             if values.get(key) not in (before, after):
                 raise ValueError(
                     "A synced group or chat has a newer local change. Undo was skipped."
@@ -129,7 +145,8 @@ def undo_locked(home, cfg):
                     k.startswith("chat-" + kind + "/")
                     and v == ident
                     and (k not in original or original[k][0] == ident)
-                    for k, v in values.items()
+                    for state in (values, renderer)
+                    for k, v in state.items()
                 ):
                     raise ValueError("An imported group now has other chats. Undo was skipped.")
         with native_api(home) as call:
@@ -139,6 +156,7 @@ def undo_locked(home, cfg):
                         raise ValueError(
                             "The imported project now has a local folder. Undo was skipped."
                         )
+            restored_placements = set()
             for key, (before, after) in sorted(
                 original.items(), key=lambda kv: 0 if kv[0].startswith("chat-") else 1
             ):
@@ -151,10 +169,15 @@ def undo_locked(home, cfg):
                         {"threadId": ident, "projectId": groups.get("project/" + str(before), "")},
                     )
                 elif kind in ("chat-section", "chat-pin"):
+                    if ident in restored_placements:
+                        continue
+                    restored_placements.add(ident)
+                    was_pinned = original.get("chat-pin/" + ident, [False])[0]
+                    previous = original.get("chat-section/" + ident, [None])[0]
                     target = (
                         desktop_layout.PINNED
-                        if kind == "chat-pin" and before
-                        else groups.get("section/" + str(before))
+                        if was_pinned
+                        else groups.get("section/" + str(previous))
                     )
                     call("thread/section/move", {"threadId": ident, "sectionId": target})
                 elif kind in ("project", "section") and key in groups:

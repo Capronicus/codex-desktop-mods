@@ -35,5 +35,14 @@ if (stage === 'seed') {
     // Starting an older native preference seed cannot revive a deleted colour.
     call(event,'seed',[[chat,'#112233']],null);
     assert.equal(new Map(call(event,'read',[],null).entries).get(chat),null);
+    // Save an entire group atomically even beyond the ordinary IPC page size.
+    write([['project/bulk','#123456'],['override-project/bulk','on']]);
+    const batch=Array.from({length:550},(_,i)=>['chat/local:bulk-'+i,'#123456']);
+    const release=['override-project/bulk',null];
+    assert.throws(()=>call(event,'finish',[...batch,[chat,'#abcdef'],release],null));
+    assert.equal(new Map(call(event,'read',[],null).entries).has(batch[0][0]),false);
+    const saved=new Map(call(event,'finish',[...batch,release],null).entries);
+    assert.equal(saved.get(release[0]),null);
+    assert.ok(batch.every(([key,value])=>saved.get(key)===value));
   }
 }

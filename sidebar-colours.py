@@ -104,10 +104,11 @@ def modify(js):
     bindings = """import {
       $Bn as sidebarColourLocalProjects, zcr as initializePreferences, $cr as preferencesReady,
       Lcr as getPreference, qcr as setPreference, Rcr as preferenceKeys, Qcr as watchPreferencePrefix,
+      wln as readProjectPage,
     } from './app-initial-fdea07eb2719.js';"""
     init = """initializePreferences();
       const sidebarColours = createSidebarColours({
-        preferencesReady, getPreference, setPreference, preferenceKeys, watchPreferencePrefix
+        preferencesReady, getPreference, setPreference, preferenceKeys, watchPreferencePrefix, readProjectPage
       });"""
     return '\n'.join([bindings, (SOURCE / 'sidebar-colours.js').read_text(encoding='utf-8'), init, js])
 

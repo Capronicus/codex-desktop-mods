@@ -21,7 +21,9 @@ import workspace_paths
 BLOCK = 1024 * 1024
 HEX = re.compile(r"[0-9a-f]{64}")
 UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
-FILE = re.compile(r"rollout-(\d{4}-\d\d-\d\d)T\d\d-\d\d-\d\d-(" + UUID.pattern + r")\.jsonl(?:\.zst)?")
+FILE = re.compile(
+    r"rollout-(\d{4}-\d\d-\d\d)T\d\d-\d\d-\d\d-(" + UUID.pattern + r")\.jsonl(?:\.zst)?"
+)
 HOME = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).resolve()
 STATE = HOME / "chat-sync"
 CONFIG = STATE / "config.json"
@@ -109,7 +111,7 @@ def setup(folder, automatic=False):
             raise ValueError("Disable this location before selecting a different folder.")
         cfg = {
             **old,
-            "origin_since":old.get("origin_since",time.time()),
+            "origin_since": old.get("origin_since", time.time()),
             "folder": str(base),
             "device": old.get("device") or str(uuid.uuid4()),
             "automatic": automatic,
@@ -123,7 +125,7 @@ def setup(folder, automatic=False):
 
 def status():
     cfg = read_json(CONFIG)
-    preview=read_json(STATE/"sidebar-preview.json",{}) if cfg and cfg.get("sidebar") else {}
+    preview = read_json(STATE / "sidebar-preview.json", {}) if cfg and cfg.get("sidebar") else {}
     return {
         "configured": bool(cfg),
         "folder": cfg and cfg["folder"],
@@ -131,10 +133,12 @@ def status():
         "automatic": bool(cfg and cfg["automatic"]),
         "colours": bool(cfg and cfg.get("colours")),
         "sidebar": bool(cfg and cfg.get("sidebar")),
-        "order":bool(cfg and cfg.get("order")),
-        "device_name":cfg and cfg.get("device_name"),
-        "sidebar_preview":{k:preview[k] for k in ("id","counts") if k in preview} or None,
-        "sidebar_layout_pending": bool(cfg and cfg.get("sidebar") and (STATE / "sidebar-layout-pending.json").is_file()),
+        "order": bool(cfg and cfg.get("order")),
+        "device_name": cfg and cfg.get("device_name"),
+        "sidebar_preview": {k: preview[k] for k in ("id", "counts") if k in preview} or None,
+        "sidebar_layout_pending": bool(
+            cfg and cfg.get("sidebar") and (STATE / "sidebar-layout-pending.json").is_file()
+        ),
         "last_run": read_json(STATE / "last.json"),
     }
 
@@ -148,12 +152,12 @@ def set_exchange_option(option, enabled):
             raise ValueError("Choose a private chat sync folder first.")
         if option == "sidebar" and not enabled:
             (STATE / "sidebar-layout-pending.json").unlink(missing_ok=True)
-        if option=="order" and enabled and not cfg.get("sidebar"):
+        if option == "order" and enabled and not cfg.get("sidebar"):
             raise ValueError("Enable sidebar sync before syncing pins and order.")
-        if option=="sidebar" and not enabled:
-            cfg["order"]=False
-        if option in ("sidebar","order") and not enabled:
-            (STATE/"sidebar-layout-pending.json").unlink(missing_ok=True)
+        if option == "sidebar" and not enabled:
+            cfg["order"] = False
+        if option in ("sidebar", "order") and not enabled:
+            (STATE / "sidebar-layout-pending.json").unlink(missing_ok=True)
         cfg[option] = enabled
         atomic(CONFIG, encode(cfg))
     return status()
@@ -205,7 +209,12 @@ def streams():
             continue
         for p in directory.rglob("rollout-*.jsonl*"):
             m = FILE.fullmatch(p.name)
-            if m and not p.is_symlink() and directory.resolve() in p.resolve().parents and p.is_file():
+            if (
+                m
+                and not p.is_symlink()
+                and directory.resolve() in p.resolve().parents
+                and p.is_file()
+            ):
                 tid = m[2]
                 if tid in result:
                     # Compression/archival can transiently leave two candidates.
@@ -322,10 +331,12 @@ def snapshot(vault, tid, entry, name, known):
         "archived": archived,
     }
     try:
-        created_at=datetime.fromisoformat(str(info.get("timestamp") or meta.get("timestamp")).replace("Z","+00:00")).timestamp()
-    except (ValueError,OSError,OverflowError):
-        created_at=0
-    return {"token": token, "manifest": manifest,"created_at":created_at}
+        created_at = datetime.fromisoformat(
+            str(info.get("timestamp") or meta.get("timestamp")).replace("Z", "+00:00")
+        ).timestamp()
+    except (ValueError, OSError, OverflowError):
+        created_at = 0
+    return {"token": token, "manifest": manifest, "created_at": created_at}
 
 
 def valid_manifest(man, tid):
@@ -586,19 +597,23 @@ def run(automatic=False):
         state = read_json(state_path, {})
         index = catalog()
         import projects, delivery
-        projects.publish_links(cfg,vault)
-        sharing=projects.Sharing(cfg,vault,index,HOME)
-        private=sharing.private_chats
+
+        projects.publish_links(cfg, vault)
+        sharing = projects.Sharing(cfg, vault, index, HOME)
+        private = sharing.private_chats
         if "origin_since" not in cfg:
-            cfg["origin_since"]=time.time()
-            atomic(CONFIG,encode(cfg))
-        origin_path=STATE/("origins-"+device+".json")
-        origins=read_json(origin_path,{})
-        original_count=len(origins)
-        previously_seen={p.stem for p in (vault/"heads").glob("*/*.json") if p.parent.name!=device}
-        accepted=set()
-        busy=set()
-        checkouts=read_json(STATE/("checkouts-"+device+".json"),{})
+            cfg["origin_since"] = time.time()
+            atomic(CONFIG, encode(cfg))
+        origin_path = STATE / ("origins-" + device + ".json")
+        origins = read_json(origin_path, {})
+        original_count = len(origins)
+        first_origin_pass = not origin_path.exists()
+        previously_seen = {
+            p.stem for p in (vault / "heads").glob("*/*.json") if p.parent.name != device
+        }
+        accepted = set()
+        busy = set()
+        checkouts = read_json(STATE / ("checkouts-" + device + ".json"), {})
         local_files = streams()
         snapshots = {}
         imported_ids = set()
@@ -617,7 +632,9 @@ def run(automatic=False):
             if tid in private:
                 continue
             row = index.get(tid)
-            if not entry or (row and row["source"] not in ("cli", "vscode", "appServer", "app_server")):
+            if not entry or (
+                row and row["source"] not in ("cli", "vscode", "appServer", "app_server")
+            ):
                 continue
             prev = state.get(tid, {})
             name = row["name"] if row else prev.get("manifest", {}).get("name")
@@ -626,13 +643,15 @@ def run(automatic=False):
             try:
                 snap = snapshot(vault, tid, entry, name, prev)
                 if snap:
-                    if not prev and tid not in origins:
+                    if tid not in origins and (
+                        not prev or first_origin_pass and tid not in previously_seen
+                    ):
                         if tid in previously_seen:
-                            origins[tid]="preexisting"
-                        elif snap.get("created_at",0)>=cfg["origin_since"]:
-                            origins[tid]="started"
+                            origins[tid] = "preexisting"
+                        elif not prev and snap.get("created_at", 0) >= cfg["origin_since"]:
+                            origins[tid] = "started"
                         else:
-                            origins[tid]="first_seen"
+                            origins[tid] = "first_seen"
                     previous = prev.get("manifest", {})
                     clock = previous.get("name_clock", [0, ""])
                     if name and name != previous.get("name"):
@@ -649,10 +668,16 @@ def run(automatic=False):
             except Busy:
                 busy.add(tid)
                 stats["busy"] += 1
-            except (OSError, ValueError, EOFError, subprocess.SubprocessError, sqlite3.Error) as exc:
+            except (
+                OSError,
+                ValueError,
+                EOFError,
+                subprocess.SubprocessError,
+                sqlite3.Error,
+            ) as exc:
                 stats["skipped"][tid] = str(exc)
-        if len(origins) != original_count:
-            atomic(origin_path,encode(origins))
+        if first_origin_pass or len(origins) != original_count:
+            atomic(origin_path, encode(origins))
         heads = shared_heads(vault, stats["skipped"])
         for tid, copies in heads.items():
             if tid in private:
@@ -678,10 +703,10 @@ def run(automatic=False):
                     best.update(
                         name=latest_name["name"], name_clock=latest_name.get("name_clock", [0, ""])
                     )
-                checkout=sharing.checkout(tid)
-                if up_to_date and checkout and checkouts.get(tid)!=checkout:
-                    materialize(vault,current,snap,checkout=checkout)
-                    checkouts[tid]=checkout
+                checkout = sharing.checkout(tid)
+                if up_to_date and checkout and checkouts.get(tid) != checkout:
+                    materialize(vault, current, snap, checkout=checkout)
+                    checkouts[tid] = checkout
                 if up_to_date:
                     accepted.add(tid)
                     if latest_name and best["name_clock"] > current.get("name_clock", [0, ""]):
@@ -693,10 +718,10 @@ def run(automatic=False):
                         state[tid]["pending_name"] = best["name"]
                         state[tid].pop("token", None)
                     continue
-                materialize(vault, best, snap, index.get(tid, {}).get("cwd"),checkout)
+                materialize(vault, best, snap, index.get(tid, {}).get("cwd"), checkout)
                 accepted.add(tid)
                 if checkout:
-                    checkouts[tid]=checkout
+                    checkouts[tid] = checkout
                 imported_ids.add(tid)
                 # Carry the name until the native app server indexes the rollout.
                 state[tid] = {"manifest": best, "pending_name": best.get("name")}
@@ -704,14 +729,22 @@ def run(automatic=False):
             except Busy:
                 busy.add(tid)
                 stats["busy"] += 1
-            except (OSError, ValueError, EOFError, subprocess.SubprocessError, sqlite3.Error) as exc:
+            except (
+                OSError,
+                ValueError,
+                EOFError,
+                subprocess.SubprocessError,
+                sqlite3.Error,
+            ) as exc:
                 stats["skipped"][tid] = str(exc)
         atomic(state_path, encode(state))
-        delivery.save(STATE/("checkouts-"+device+".json"),checkouts)
+        delivery.save(STATE / ("checkouts-" + device + ".json"), checkouts)
         pending = {
             tid: s["pending_name"]
             for tid, s in state.items()
-            if tid not in private and s.get("pending_name") and (tid in local_files or "token" not in s)
+            if tid not in private
+            and s.get("pending_name")
+            and (tid in local_files or "token" not in s)
         }
         if pending:
             from native_names import apply_names
@@ -725,18 +758,48 @@ def run(automatic=False):
             for tid, row in index.items()
             if row["source"] in ("cli", "vscode", "appServer", "app_server")
         )
-        delivery.exchange(vault,cfg,heads,accepted,busy,stats,state,private,set(snapshots)|imported_ids,origins)
+        delivery.exchange(
+            vault,
+            cfg,
+            heads,
+            accepted,
+            busy,
+            stats,
+            state,
+            private,
+            set(snapshots) | imported_ids,
+            origins,
+        )
         if cfg.get("sidebar"):
             import sidebar
+
             try:
                 # Only exchange membership for the local human chats this engine handles.
-                stats["sidebar"] = sidebar.exchange(HOME, vault, device, snapshots.keys() | imported_ids, atomic, encode,cfg=cfg,sharing=sharing)
-            except (OSError, EOFError, ValueError, sqlite3.Error, subprocess.SubprocessError) as exc:
+                stats["sidebar"] = sidebar.exchange(
+                    HOME,
+                    vault,
+                    device,
+                    snapshots.keys() | imported_ids,
+                    atomic,
+                    encode,
+                    cfg=cfg,
+                    sharing=sharing,
+                )
+            except (
+                OSError,
+                EOFError,
+                ValueError,
+                sqlite3.Error,
+                subprocess.SubprocessError,
+            ) as exc:
                 stats["sidebar"] = {"error": str(exc)}
         if cfg.get("colours"):
             import colours
+
             try:
-                stats["colours"] = colours.exchange(HOME, vault, device, index, atomic, encode,sharing)
+                stats["colours"] = colours.exchange(
+                    HOME, vault, device, index, atomic, encode, sharing
+                )
             except (OSError, ValueError, sqlite3.Error) as exc:
                 stats["colours"] = {"error": str(exc)}
         atomic(STATE / "last.json", encode(stats))
@@ -753,7 +816,8 @@ def keep_branch(tid, device):
             raise ValueError("Choose a private sync folder first.")
         vault = Path(cfg["folder"]) / "codex-chat-sync-v1"
         import projects
-        if tid in projects.Sharing(cfg,vault,catalog(),HOME).private_chats:
+
+        if tid in projects.Sharing(cfg, vault, catalog(), HOME).private_chats:
             raise ValueError("This chat is marked local only.")
         missing = {}
         copies = shared_heads(vault, missing).get(tid, {})
@@ -814,7 +878,8 @@ def adopt_history(tid, device):
             raise ValueError("Select a different device from this chat’s conflict report.")
         vault = Path(cfg["folder"]) / "codex-chat-sync-v1"
         import projects
-        if tid in projects.Sharing(cfg,vault,catalog(),HOME).private_chats:
+
+        if tid in projects.Sharing(cfg, vault, catalog(), HOME).private_chats:
             raise ValueError("This chat is marked local only.")
         missing = {}
         copies = shared_heads(vault, missing).get(tid, {})

@@ -26,7 +26,15 @@ async function run() {
           itemKeys:['one','two','three'].map(key => 'codex:thread:local:' + key)}]}}]
       ]);
       const watchers = new Map();
+      window.testPreferences = prefs;
+      window.pageRequests = [];
       createSidebarColours({
+        async readProjectPage({projectId,cursor}){
+          if (projectId !== 'g-p-fixture') throw Error('Unexpected project');
+          window.pageRequests.push(cursor);
+          if (cursor && window.offline) throw Error('Offline');
+          return cursor ? {items:[{id:'hidden-second'}],cursor:null} : {items:[{id:'hidden-first'}],cursor:'next'};
+        },
         preferencesReady: () => Promise.resolve(), getPreference: key => prefs.get(key),
         setPreference(key,value) {
           if (value == null) prefs.delete(key); else prefs.set(key,value);
@@ -77,7 +85,28 @@ async function run() {
     await page.locator('dialog[open]').getByText('Renamed section', {exact:true}).waitFor();
     await page.getByRole('button',{name:'Use default colour'}).click();
     assert.deepEqual(await colours(), [violet,violet,violet,native]);
-    console.log('PASS section picker, inheritance order, Recents, rename, collapse and reset.');
+    await page.evaluate(()=>{
+      document.body.insertAdjacentHTML('beforeend','<button data-app-action-sidebar-project-id="g-p-fixture">Cloud fixture</button>');
+      window.offline=true;
+    });
+    const cloud=page.getByRole('button',{name:'Cloud fixture'});
+    const openCloud=()=>cloud.click({modifiers:['Shift'],button:'right'});
+    await openCloud();
+    await page.getByRole('button',{name:'Violet',exact:true}).click();
+    await openCloud();
+    await toggle.check();
+    await toggle.click();
+    await page.getByRole('alert').filter({hasText:'Could not load all chats'}).waitFor();
+    assert.ok(await toggle.isChecked());
+    const cloudColours=()=>page.evaluate(()=>['hidden-first','hidden-second'].map(id=>
+      window.testPreferences.get('codex.sidebar-colours.v1/chat/chatgpt:conversation:'+id) ?? null));
+    assert.deepEqual(await cloudColours(), [null,null]);
+    await page.evaluate(()=>{window.offline=false;});
+    await toggle.uncheck();
+    await page.waitForFunction(()=>!document.querySelector('.csc-override input')?.disabled);
+    assert.deepEqual(await cloudColours(), ['#9a77d3','#9a77d3']);
+    assert.deepEqual(await page.evaluate(()=>window.pageRequests),[null,'next',null,'next']);
+    console.log('PASS section inheritance, permanent group colours, hidden pages and safe retry.');
   } finally {
     await browser.close();
   }

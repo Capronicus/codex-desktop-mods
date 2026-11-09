@@ -223,7 +223,9 @@ def exchange(
                     raise ValueError("Invalid shared sidebar records")
                 for key, record in links.rows(head["rows"], portable=False).items():
                     first_remote = key in new_orders and path.stem != device
-                    if permitted(key, record) and (first_remote or key not in rows or record[:2] > rows[key][:2]):
+                    if permitted(key, record) and (
+                        first_remote or key not in rows or record[:2] > rows[key][:2]
+                    ):
                         if first_remote:
                             new_orders.discard(key)
                         rows[key] = filtered_order(key, record)
@@ -277,7 +279,7 @@ def exchange(
     if action == "apply":
         reviewed = True
     preview_file.unlink(missing_ok=True)
-    batch_id = batches.begin(home, device, review, changes, native)
+    batch_id = batches.begin(home, device, review, changes, native, pinned, rows)
 
     def checkpoint():
         observed = dict(current)

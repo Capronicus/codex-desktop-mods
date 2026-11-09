@@ -375,7 +375,7 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     const setting = kind + '/' + savedId();
     const force = 'override-' + setting;
     async function change(entries,mode) {
-      try { await write(entries,mode); return true; }
+      try { await write(entries,mode); error.textContent = ''; return true; }
       catch { error.textContent = 'Could not save the colour in this profile.'; return false; }
     }
     async function finishOverride(reset=false) {
