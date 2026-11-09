@@ -37,7 +37,9 @@ async function probe(url) {
     assert.ok(data[turn]?.end, 'reply timestamp');
     const parents = await evaluate(`window.localChatDetails.forkParents(["${thread}"])`);
     assert.equal(parents[thread], parent);
-    console.log('Verified real Windows timestamp, token and fork IPC.');
+    const receipt=await evaluate(`window.localChatDetails.delivery(["${thread}"])`);
+    assert.equal(receipt[thread]?.received_by[0].name,'Linux QA');
+    console.log('Verified real Windows timestamp, token, fork and chat delivery IPC.');
     const project = 'document.querySelector(\'[data-app-action-sidebar-project-label="Windows QA"]\')';
     for (let i = 0; i < 45 && !await evaluate(`!!${project}`); i++) await wait(700);
     assert.equal(await evaluate(`!!${project}`), true, 'native sidebar project');

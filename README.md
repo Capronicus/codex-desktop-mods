@@ -26,6 +26,8 @@ With Desktop Mods 0.6.0 and Chat Sync 0.2.0 installed on each computer, ask **En
 
 Chat Sync 0.3.0 also offers **Enable sidebar sync**. Enable it on each participating desktop to exchange local project and custom section names and the project and section of each synced Codex chat. Choose a project folder separately on each computer.
 
+Chat Sync 0.4.0 adds explicit project linking to local checkouts, per-chat delivery receipts, local-only rules for projects and chats, sidebar merge previews and undo, and an optional shared pin order and project/section order. Desktop Mods 0.7.0 displays receipt status on local sidebar chat titles.
+
 Read the [setup and conflict recovery guide](plugins/chat-sync/README.md).
 
 ## Windows

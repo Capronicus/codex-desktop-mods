@@ -199,6 +199,23 @@
       inherited:db.prepare('SELECT chat,project,section FROM inherited').all()};
   });
 
+  let receiptCache;
+  ipcMain.handle('local-chat-sync:delivery', async (event,ids) => {
+    const frame=event.senderFrame;
+    if (!frame || frame!==event.sender.mainFrame || !/^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(frame.url) ||
+        !Array.isArray(ids) || ids.length>128 || !ids.every(id=>typeof id==='string' && idPattern.test(id))) return {};
+    try {
+      const folder=path.join(home,'chat-sync');
+      const config=JSON.parse(await fs.readFile(path.join(folder,'config.json'),'utf8'));
+      const file=path.join(folder,'delivery.json'), stamp=await fs.stat(file);
+      if (!receiptCache || receiptCache.mtime!==stamp.mtimeMs || receiptCache.ino!==stamp.ino)
+        receiptCache={mtime:stamp.mtimeMs,ino:stamp.ino,doc:JSON.parse(await fs.readFile(file,'utf8'))};
+      if (receiptCache.doc.device!==config.device) return {};
+      return Object.fromEntries(ids.filter(id=>receiptCache.doc.chats[id]).map(id=>
+        [id,config.private_chats?.includes(id)?{status:'local_only'}:receiptCache.doc.chats[id]]));
+    } catch { return {}; }
+  });
+
   ipcMain.handle('local-chat-details:fork-parents', async (event, ids) => {
     const frame = event.senderFrame;
     if (!frame || frame !== event.sender.mainFrame || !/^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(frame.url)

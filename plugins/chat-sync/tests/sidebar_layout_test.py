@@ -131,14 +131,18 @@ class DesktopSidebar(unittest.TestCase):
             rows = {k: [0, peer, v] for k, v in values.items()}
             sync.atomic(head, sync.encode({"v": 1, "rows": rows}))
 
-            def exchange():
-                return sidebar.exchange(home, vault, dev, {tid}, sync.atomic, sync.encode)
+            def exchange(**args):
+                return sidebar.exchange(home, vault, dev, {tid}, sync.atomic, sync.encode,**args)
 
             with (
                 patch.object(desktop_layout, "desktop_running", return_value=True),
                 patch.object(desktop_layout.subprocess, "Popen"),
             ):
-                self.assertTrue(exchange()["desktop_refresh_on_quit"])
+                preview=exchange()
+                self.assertTrue(preview["preview_required"])
+                self.assertEqual(preview["counts"]["project_created"],1)
+                self.assertFalse((plugin/desktop_layout.QUEUE).exists())
+                self.assertTrue(exchange(action="apply",approval=preview["id"])["desktop_refresh_on_quit"])
                 self.assertNotIn("local-projects", sync.read_json(statefile))
             with patch.object(desktop_layout, "desktop_running", return_value=False):
                 self.assertTrue(desktop_layout.apply_pending(home))

@@ -50,6 +50,11 @@ def main():
         archive = home/'archived_sessions'
         archive.mkdir(exist_ok=True)
         parent, thread, turn = ['01a1aa55-1234-7000-8000-0000000000'+suffix for suffix in ['10','11','12']]
+        sync_dir=home/'chat-sync'
+        sync_dir.mkdir()
+        (sync_dir/'config.json').write_text(json.dumps({'device':parent}))
+        (sync_dir/'delivery.json').write_text(json.dumps({'device':parent,'chats':{thread:{'status':'received',
+            'received_by':[{'name':'Linux QA','device':turn}],'waiting_on':[]}}}))
         rows = [('session_meta',{'id':thread,'forked_from_id':parent}),
                 ('event_msg',{'type':'task_started','turn_id':turn}),
                 ('token_usage_record',{'turn_id':turn,'turn_token_usage':{'total_tokens':25},

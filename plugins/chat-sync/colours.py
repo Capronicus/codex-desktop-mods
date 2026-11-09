@@ -67,7 +67,7 @@ def memberships(home, colours, index):
     return links
 
 
-def exchange(home, vault, device, index, atomic, encode):
+def exchange(home, vault, device, index, atomic, encode, sharing=None):
     directory = vault / "colours-v1"
     peers = []
     deferred = []
@@ -83,6 +83,9 @@ def exchange(home, vault, device, index, atomic, encode):
                     item is None or isinstance(item, str) and ID.fullmatch(item) for item in pair
                 ):
                     raise ValueError("Invalid colour group references")
+            if sharing:
+                doc["entries"]=[r for r in doc["entries"] if sharing.allows_colour(r[0])]
+                doc["members"]={k:v for k,v in doc["members"].items() if sharing.allows_colour("chat/"+k) and v[0] not in sharing.private_projects}
             peers.append(doc)
         except (ValueError, KeyError, TypeError, AttributeError, OSError):
             deferred.append(file.stem)
@@ -101,9 +104,11 @@ def exchange(home, vault, device, index, atomic, encode):
                 """, peer["entries"])
                 updates += result.rowcount
             rows = db.execute("SELECT key,value,rev,author FROM colours ORDER BY key").fetchall()
-        rows = [r for r in rows if valid(r)]
+        rows = [r for r in rows if valid(r) and (not sharing or sharing.allows_colour(r[0]))]
         active = {key for key, value, _, _ in rows if value is not None}
         own = memberships(home, active, index)
+        if sharing:
+            own={k:v for k,v in own.items() if sharing.allows_colour("chat/"+k) and v[0] not in sharing.private_projects}
         hints = {}
         for peer in peers:
             for chat, (project, section) in peer["members"].items():

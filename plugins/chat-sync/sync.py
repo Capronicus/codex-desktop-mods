@@ -108,6 +108,7 @@ def setup(folder, automatic=False):
         if old and old["folder"] != str(base):
             raise ValueError("Disable this location before selecting a different folder.")
         cfg = {
+            **old,
             "folder": str(base),
             "device": old.get("device") or str(uuid.uuid4()),
             "automatic": automatic,
@@ -121,6 +122,7 @@ def setup(folder, automatic=False):
 
 def status():
     cfg = read_json(CONFIG)
+    preview=read_json(STATE/"sidebar-preview.json",{}) if cfg and cfg.get("sidebar") else {}
     return {
         "configured": bool(cfg),
         "folder": cfg and cfg["folder"],
@@ -128,13 +130,16 @@ def status():
         "automatic": bool(cfg and cfg["automatic"]),
         "colours": bool(cfg and cfg.get("colours")),
         "sidebar": bool(cfg and cfg.get("sidebar")),
+        "order":bool(cfg and cfg.get("order")),
+        "device_name":cfg and cfg.get("device_name"),
+        "sidebar_preview":{k:preview[k] for k in ("id","counts") if k in preview} or None,
         "sidebar_layout_pending": bool(cfg and cfg.get("sidebar") and (STATE / "sidebar-layout-pending.json").is_file()),
         "last_run": read_json(STATE / "last.json"),
     }
 
 
 def set_exchange_option(option, enabled):
-    if option not in ("colours", "sidebar") or type(enabled) is not bool:
+    if option not in ("colours", "sidebar", "order") or type(enabled) is not bool:
         raise ValueError("Unknown sync option")
     with lock(STATE / "sync.lock"):
         cfg = read_json(CONFIG)
@@ -142,6 +147,12 @@ def set_exchange_option(option, enabled):
             raise ValueError("Choose a private chat sync folder first.")
         if option == "sidebar" and not enabled:
             (STATE / "sidebar-layout-pending.json").unlink(missing_ok=True)
+        if option=="order" and enabled and not cfg.get("sidebar"):
+            raise ValueError("Enable sidebar sync before syncing pins and order.")
+        if option=="sidebar" and not enabled:
+            cfg["order"]=False
+        if option in ("sidebar","order") and not enabled:
+            (STATE/"sidebar-layout-pending.json").unlink(missing_ok=True)
         cfg[option] = enabled
         atomic(CONFIG, encode(cfg))
     return status()
@@ -464,7 +475,7 @@ def recover_projections():
             journal.unlink(missing_ok=True)
 
 
-def materialize(vault, man, local, cwd=None):
+def materialize(vault, man, local, cwd=None, checkout=None):
     tid = man["id"]
     diverged = local is not None and not is_prefix(vault, local["manifest"], man)
     with native_writer(tid):
@@ -493,6 +504,10 @@ def materialize(vault, man, local, cwd=None):
             fallback = STATE / "workspaces" / tid
             if workspace_paths.local_dir(cwd):
                 fallback = Path(cwd)
+            if checkout and not workspace_paths.local_dir(checkout):
+                raise ValueError("The linked checkout folder is unavailable on this device.")
+            if checkout:
+                fallback = Path(checkout)
             with os.fdopen(fd, "wb") as out, tempfile.TemporaryFile(dir=dest.parent) as raw:
                 for i, key in enumerate(man["chunks"]):
                     data = block_data(vault, key)
@@ -507,7 +522,7 @@ def materialize(vault, man, local, cwd=None):
                 if raw.read() != b"\n":
                     raise ValueError("Incomplete final record")
                 raw.seek(0)
-                out.writelines(workspace_paths.pieces(raw, fallback))
+                out.writelines(workspace_paths.pieces(raw, fallback, bool(checkout)))
                 out.flush()
                 os.fsync(out.fileno())
             if dest.suffix == ".zst":
@@ -550,6 +565,13 @@ def run(automatic=False):
         state_path = STATE / ("state-" + device + ".json")
         state = read_json(state_path, {})
         index = catalog()
+        import projects, delivery
+        projects.publish_links(cfg,vault)
+        sharing=projects.Sharing(cfg,vault,index,HOME)
+        private=sharing.private_chats
+        accepted=set()
+        busy=set()
+        checkouts=read_json(STATE/("checkouts-"+device+".json"),{})
         local_files = streams()
         snapshots = {}
         imported_ids = set()
@@ -565,6 +587,8 @@ def run(automatic=False):
         # A missing cloud block or delayed head can always be retried. Local files
         # are only replaced after the complete incoming snapshot has been verified.
         for tid, entry in local_files.items():
+            if tid in private:
+                continue
             row = index.get(tid)
             if not entry or (row and row["source"] not in ("cli", "vscode", "appServer", "app_server")):
                 continue
@@ -589,11 +613,14 @@ def run(automatic=False):
                         stats["exported"] += 1
                     state[tid] = snap
             except Busy:
+                busy.add(tid)
                 stats["busy"] += 1
             except (OSError, ValueError, EOFError, subprocess.SubprocessError, sqlite3.Error) as exc:
                 stats["skipped"][tid] = str(exc)
         heads = shared_heads(vault, stats["skipped"])
         for tid, copies in heads.items():
+            if tid in private:
+                continue
             try:
                 if tid in stats["skipped"] or (tid in local_files and tid not in snapshots):
                     continue
@@ -615,7 +642,12 @@ def run(automatic=False):
                     best.update(
                         name=latest_name["name"], name_clock=latest_name.get("name_clock", [0, ""])
                     )
+                checkout=sharing.checkout(tid)
+                if up_to_date and checkout and checkouts.get(tid)!=checkout:
+                    materialize(vault,current,snap,checkout=checkout)
+                    checkouts[tid]=checkout
                 if up_to_date:
+                    accepted.add(tid)
                     if latest_name and best["name_clock"] > current.get("name_clock", [0, ""]):
                         state[tid]["manifest"] = {
                             **current,
@@ -625,20 +657,25 @@ def run(automatic=False):
                         state[tid]["pending_name"] = best["name"]
                         state[tid].pop("token", None)
                     continue
-                materialize(vault, best, snap, index.get(tid, {}).get("cwd"))
+                materialize(vault, best, snap, index.get(tid, {}).get("cwd"),checkout)
+                accepted.add(tid)
+                if checkout:
+                    checkouts[tid]=checkout
                 imported_ids.add(tid)
                 # Carry the name until the native app server indexes the rollout.
                 state[tid] = {"manifest": best, "pending_name": best.get("name")}
                 stats["updated" if current else "imported"] += 1
             except Busy:
+                busy.add(tid)
                 stats["busy"] += 1
             except (OSError, ValueError, EOFError, subprocess.SubprocessError, sqlite3.Error) as exc:
                 stats["skipped"][tid] = str(exc)
         atomic(state_path, encode(state))
+        delivery.save(STATE/("checkouts-"+device+".json"),checkouts)
         pending = {
             tid: s["pending_name"]
             for tid, s in state.items()
-            if s.get("pending_name") and (tid in local_files or "token" not in s)
+            if tid not in private and s.get("pending_name") and (tid in local_files or "token" not in s)
         }
         if pending:
             from native_names import apply_names
@@ -652,17 +689,18 @@ def run(automatic=False):
             for tid, row in index.items()
             if row["source"] in ("cli", "vscode", "appServer", "app_server")
         )
+        delivery.exchange(vault,cfg,heads,accepted,busy,stats,state,private,set(snapshots)|imported_ids)
         if cfg.get("sidebar"):
             import sidebar
             try:
                 # Only exchange membership for the local human chats this engine handles.
-                stats["sidebar"] = sidebar.exchange(HOME, vault, device, snapshots.keys() | imported_ids, atomic, encode)
+                stats["sidebar"] = sidebar.exchange(HOME, vault, device, snapshots.keys() | imported_ids, atomic, encode,cfg=cfg,sharing=sharing)
             except (OSError, EOFError, ValueError, sqlite3.Error, subprocess.SubprocessError) as exc:
                 stats["sidebar"] = {"error": str(exc)}
         if cfg.get("colours"):
             import colours
             try:
-                stats["colours"] = colours.exchange(HOME, vault, device, index, atomic, encode)
+                stats["colours"] = colours.exchange(HOME, vault, device, index, atomic, encode,sharing)
             except (OSError, ValueError, sqlite3.Error) as exc:
                 stats["colours"] = {"error": str(exc)}
         atomic(STATE / "last.json", encode(stats))
@@ -678,6 +716,9 @@ def keep_branch(tid, device):
         if not cfg:
             raise ValueError("Choose a private sync folder first.")
         vault = Path(cfg["folder"]) / "codex-chat-sync-v1"
+        import projects
+        if tid in projects.Sharing(cfg,vault,catalog(),HOME).private_chats:
+            raise ValueError("This chat is marked local only.")
         missing = {}
         copies = shared_heads(vault, missing).get(tid, {})
         if tid in missing or device not in copies:
@@ -736,6 +777,9 @@ def adopt_history(tid, device):
         if not cfg or cfg["device"] == device:
             raise ValueError("Select a different device from this chat’s conflict report.")
         vault = Path(cfg["folder"]) / "codex-chat-sync-v1"
+        import projects
+        if tid in projects.Sharing(cfg,vault,catalog(),HOME).private_chats:
+            raise ValueError("This chat is marked local only.")
         missing = {}
         copies = shared_heads(vault, missing).get(tid, {})
         own, chosen = copies.get(cfg["device"]), copies.get(device)

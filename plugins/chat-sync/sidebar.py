@@ -3,11 +3,15 @@
 from contextlib import closing, ExitStack
 import json
 import re
+from pathlib import Path
 import sqlite3
 import uuid
 
 from native_names import native_api
 import desktop_layout
+import projects
+import ordering
+import batches
 
 ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 GROUPS = ("project", "section")
@@ -84,7 +88,19 @@ def catalogue(home, aliases, eligible, pending, layout):
     return groups, seen, pinned
 
 
-def exchange(home, vault, device, eligible, atomic, encode):
+def exchange(
+    home,
+    vault,
+    device,
+    eligible,
+    atomic,
+    encode,
+    *,
+    cfg=None,
+    sharing=None,
+    action="sync",
+    approval="",
+):
     directory = vault / "sidebar-v1"
     state_path = home / "chat-sync" / ("sidebar-" + device + ".json")
     map_path = home / "chat-sync" / "sidebar-section-ids.json"
@@ -94,6 +110,14 @@ def exchange(home, vault, device, eligible, atomic, encode):
     rows, last = state["rows"], state["seen"]
     hidden = set(state["hidden"])
     layout = desktop_layout.Layout(home)
+    cfg = cfg if cfg is not None else load(home / "chat-sync" / "config.json", {})
+    queued = load(home / "chat-sync" / desktop_layout.QUEUE, {})
+    if queued.get("undo"):
+        return {"undo_on_quit": True}
+    ordering_on = bool(cfg.get("order"))
+    links = projects.Links(
+        cfg, vault, layout.projects if layout.enabled else projects.local_projects(home)
+    )
     section_access = not layout.enabled or bool(layout.account)
     if (
         layout.enabled
@@ -105,7 +129,58 @@ def exchange(home, vault, device, eligible, atomic, encode):
             "This sidebar belongs to another signed-in account. Switch back to sync its layout."
         )
     groups, native, pinned = catalogue(home, aliases, eligible, pending, layout)
-    current = layout.observed(eligible) if layout.enabled else native
+    raw_groups = dict(groups)
+    for key, ident in raw_groups.items():
+        if key.startswith("project/"):
+            target = links.local(key.split("/")[1])
+            groups.setdefault("project/" + target, ident)
+    raw_current = layout.observed(eligible) if layout.enabled else dict(native)
+    if ordering_on:
+        raw_current.update(ordering.observe(layout, eligible, pinned))
+        native.update({"chat-pin/" + tid: tid in pinned for tid in eligible})
+
+    def local_values(values):
+        # Prefer this computer's chosen project when both physical rows already exist.
+        result = {}
+        for key, val in sorted(
+            values.items(), key=lambda kv: kv[0].split("/")[-1] in links.preferred.values()
+        ):
+            if key.startswith("project/"):
+                key = "project/" + links.local(key.split("/")[1])
+            elif key.startswith("chat-project/") and val:
+                val = links.local(val)
+            if key == "order/projects":
+                val = list(dict.fromkeys(links.local(i) for i in val))
+            result[key] = val
+        return result
+
+    rows = links.rows(rows, portable=False)
+    last = local_values(last)
+    current = local_values(raw_current)
+
+    def permitted(k, r):
+        if sharing and not sharing.allows_row(k, r):
+            return False
+        return ordering_on or not k.startswith(("chat-pin/", "order/"))
+
+    def filtered_order(key, record):
+        if key.startswith("order/") and sharing:
+            return [
+                *record[:2],
+                [
+                    i
+                    for i in record[2]
+                    if i not in sharing.private_chats and i not in sharing.private_projects
+                ],
+            ]
+        return record
+
+    rows = {k: filtered_order(k, r) for k, r in rows.items() if permitted(k, r)}
+    current = {
+        k: filtered_order(k, [0, device, v])[2]
+        for k, v in current.items()
+        if permitted(k, [0, device, v])
+    }
     current = {k: v for k, v in current.items() if k.split("/")[0] not in GROUPS or valid_name(v)}
     # Only an object previously present on this desktop can have been deleted here.
     hidden.update(
@@ -121,7 +196,7 @@ def exchange(home, vault, device, eligible, atomic, encode):
         old = last.get(key, MISSING)
         prior = rows.get(key)
         if old is MISSING:
-            if prior is None and value is not None:
+            if prior is None and value is not None and value is not False and value != []:
                 rows[key] = [0, device, value]
         elif old != value and (not prior or prior[2] != value):
             kind = key.split("/")[0]
@@ -130,22 +205,75 @@ def exchange(home, vault, device, eligible, atomic, encode):
             rows[key] = [clock, device, value]
 
     deferred = []
-    for path in sorted(directory.glob("*.json")):
-        if not uid(path.stem):
+    folders = [(directory, valid_record)]
+    if ordering_on:
+        folders.append((vault / "order-v1", ordering.valid))
+    for folder, validator in folders:
+        for path in sorted(folder.glob("*.json")):
+            if not uid(path.stem):
+                continue
+            try:
+                head = load(path, None)
+                if (
+                    head["v"] != 1
+                    or not isinstance(head["rows"], dict)
+                    or not all(validator(k, r) for k, r in head["rows"].items())
+                ):
+                    raise ValueError("Invalid shared sidebar records")
+                for key, record in links.rows(head["rows"], portable=False).items():
+                    if permitted(key, record) and (key not in rows or record[:2] > rows[key][:2]):
+                        rows[key] = filtered_order(key, record)
+            except (AttributeError, KeyError, OSError, TypeError, ValueError):
+                deferred.append(path.stem)
+
+    changes = {}
+    for key, (_, _, value) in rows.items():
+        kind, obj = key.split("/")
+        if key in hidden or (kind in ("section", "chat-section") and not section_access):
             continue
-        try:
-            head = load(path, None)
-            if (
-                head["v"] != 1
-                or not isinstance(head["rows"], dict)
-                or not all(valid_record(k, r) for k, r in head["rows"].items())
-            ):
-                raise ValueError("Invalid sidebar records")
-            for key, record in head["rows"].items():
-                if key not in rows or record[:2] > rows[key][:2]:
-                    rows[key] = record
-        except (AttributeError, KeyError, OSError, TypeError, ValueError):
-            deferred.append(path.stem)
+        if kind.startswith("chat-") and (obj not in eligible or key not in current):
+            continue
+        if kind in PLACEMENT and value and PLACEMENT[kind] + "/" + value in hidden:
+            continue
+        if kind == "order":
+            if not layout.enabled or obj == "sections" and not section_access:
+                continue
+            if obj == "pins":
+                value = [
+                    i
+                    for i in value
+                    if i in eligible
+                    and rows.get("chat-pin/" + i, [0, None, current.get("chat-pin/" + i)])[2]
+                ]
+            else:
+                group = "project" if obj == "projects" else "section"
+                value = [
+                    i for i in value if group + "/" + i in rows and group + "/" + i not in hidden
+                ]
+            existing = current.get(key, [])
+            value = ordering.reorder(existing + list(i for i in value if i not in existing), value)
+        if current.get(key) != value:
+            changes[key] = [current.get(key), value]
+    review = batches.summarize(changes)
+    preview_file = home / "chat-sync" / "sidebar-preview.json"
+    reviewed = state.get("reviewed", False)
+    if action == "preview":
+        return review
+    if action == "apply" and approval != review["id"]:
+        raise ValueError("The sidebar preview changed. Request a fresh preview.")
+    if (
+        changes
+        and layout.enabled
+        and not reviewed
+        and action != "apply"
+        and cfg.get("review_first", True)
+    ):
+        atomic(preview_file, encode(review))
+        return {"preview_required": True, **review}
+    if action == "apply":
+        reviewed = True
+    preview_file.unlink(missing_ok=True)
+    batch_id = batches.begin(home, device, review, changes, native)
 
     def checkpoint():
         observed = dict(current)
@@ -156,6 +284,7 @@ def exchange(home, vault, device, eligible, atomic, encode):
         saved = encode(
             {
                 "rows": rows,
+                "reviewed": reviewed,
                 "seen": observed,
                 "hidden": sorted(hidden),
                 "account": layout.account or state.get("account"),
@@ -167,10 +296,15 @@ def exchange(home, vault, device, eligible, atomic, encode):
     # The intent precedes any native mutation. On retry, a matching value is
     # acknowledged as our own applied change instead of creating a new revision.
     checkpoint()
-    head_path = directory / (device + ".json")
-    content = encode({"v": 1, "rows": rows})
-    if not head_path.is_file() or head_path.read_bytes() != content:
-        atomic(head_path, content)
+    for folder, validator in folders:
+        ordered = validator is ordering.valid
+        head_path = folder / (device + ".json")
+        outgoing = {
+            k: r for k, r in rows.items() if k.startswith(("chat-pin/", "order/")) == ordered
+        }
+        content = encode({"v": 1, "rows": links.rows(outgoing, portable=True)})
+        if not head_path.is_file() or head_path.read_bytes() != content:
+            atomic(head_path, content)
 
     created = renamed = moved = 0
     waiting = set()
@@ -256,6 +390,42 @@ def exchange(home, vault, device, eligible, atomic, encode):
                 created += 1
             groups[key], native[key] = local, name
 
+        for ident, binding in cfg.get("project_links", {}).items():
+            local = groups.get("project/" + ident)
+            if local and Path(binding["folder"]).is_dir():
+                project = rpc("project/read", {"projectId": local})["project"]
+                roots = project["roots"]
+                if not roots or roots[0]["path"] != binding["folder"]:
+                    rpc(
+                        "project/update",
+                        {
+                            "projectId": local,
+                            "roots": [
+                                {"path": binding["folder"]},
+                                *[r for r in roots if r["path"] != binding["folder"]],
+                            ],
+                        },
+                    )
+        for key, record in rows.items():
+            if key.startswith("chat-pin/"):
+                tid = key.split("/")[1]
+                if tid in eligible and bool(tid in pinned) != record[2]:
+                    if "chat-section/" + tid not in native:
+                        try:
+                            rpc("thread/read", {"threadId": tid})
+                        except ValueError:
+                            waiting.add(tid)
+                            continue
+                    section = (
+                        desktop_layout.PINNED
+                        if record[2]
+                        else groups.get(
+                            "section/" + str(rows.get("chat-section/" + tid, [0, None, None])[2])
+                        )
+                    )
+                    rpc("thread/section/move", {"threadId": tid, "sectionId": section})
+                    (pinned.add if record[2] else pinned.discard)(tid)
+                    native[key] = record[2]
         for key, record in rows.items():
             kind, tid = key.split("/")
             if kind not in PLACEMENT:
@@ -286,12 +456,25 @@ def exchange(home, vault, device, eligible, atomic, encode):
             native[key] = target
             moved += 1
     if not layout.enabled:
-        current = native
+        current = local_values(native)
     checkpoint()
     pending_layout = False
     if layout.enabled:
-        changes = {}
+        projection = {}
+        cached_pins = set(
+            layout.data.get("electron-persisted-atom-state", {}).get(
+                "app-server-pinned-thread-order-v1", []
+            )
+        )
+        cached_order = ordering.observe(layout, eligible, cached_pins) if ordering_on else {}
         for key, (_, _, value) in rows.items():
+            if key.startswith(("chat-pin/", "order/")):
+                desired = changes.get(key, [None, value])[1]
+                if key.startswith("chat-pin/") and key.split("/")[1] not in eligible:
+                    continue
+                if key in cached_order and cached_order[key] != desired:
+                    projection[key] = [cached_order[key], desired, None]
+                continue
             kind, obj = key.split("/")
             native_id = groups.get(key)
             if key in hidden or (kind in ("section", "chat-section") and not section_access):
@@ -306,8 +489,27 @@ def exchange(home, vault, device, eligible, atomic, encode):
                 continue
             if kind in GROUPS and not native_id:
                 continue
-            changes[key] = [current.get(key), value, native_id]
-        pending_layout = desktop_layout.queue(home, device, layout, changes)
+            projection[key] = [raw_current.get(key), value, native_id]
+        for local, binding in cfg.get("project_links", {}).items():
+            if local in layout.projects and binding["folder"] not in layout.projects[local].get(
+                "rootPaths", []
+            ):
+                projection["checkout/" + local] = [
+                    layout.projects[local].get("rootPaths", []),
+                    binding["folder"],
+                    groups.get("project/" + local),
+                ]
+        for old, project in layout.projects.items():
+            primary = links.local(old)
+            if (
+                old != primary
+                and primary in layout.projects
+                and not project.get("rootPaths")
+                and not project.get("chatGptBacking")
+                and (primary in cfg.get("project_links", {}) or "project/" + old in last)
+            ):
+                projection["alias/" + old] = [old, primary, None]
+        pending_layout = desktop_layout.queue(home, device, layout, projection, batch_id=batch_id)
     return {
         "desktop_refresh_on_quit": pending_layout,
         "sections_need_sign_in": not section_access,

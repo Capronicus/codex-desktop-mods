@@ -23,9 +23,27 @@ Working directories, credentials, external attachments, repository files and reg
 
 After configuring the private chat folder, ask **Enable sidebar sync** on each desktop, then **Sync my chats now**. From the CLI use `python3 sync.py sidebar on` or `sidebar off`. This setting starts off and is independent of colour sync.
 
-The next pass exchanges local Codex project and custom section names, including empty groups. A synced chat can belong to both a project and a section. Subsequent renames, chat moves and removals from a group also travel. Independent groups with identical names keep their own identities. Local group deletion stays local. Pins, display order, cloud-only ChatGPT items and project files stay on their respective desktops.
+The next pass exchanges local Codex project and custom section names, including empty groups. A synced chat can belong to both a project and a section. Subsequent renames, chat moves and removals from a group also travel. Independent groups with identical names keep their own identities. Local group deletion stays local. Cloud-only ChatGPT items and project files stay on their respective desktops. Pins and ordering have a separate opt-in.
 
-An imported project starts with no folder attached. Select its local checkout on each computer when needed. When the sync result shows `desktop_refresh_on_quit`, fully quit the desktop app and reopen it. A local helper applies the queued sidebar changes after the app exits. If the computer shut down first, the next sync queues the layout again. You can also quit the desktop app and run `python3 sync.py sync` from the plugin directory (`py sync.py sync` on Windows). Custom sections appear under the signed-in ChatGPT account. A chat that arrives before its complete history is available gets its assignments on a subsequent pass.
+An imported project starts with no folder attached unless you link it to an existing checkout. Select its local checkout on each computer when needed. When the sync result shows `desktop_refresh_on_quit`, fully quit the desktop app and reopen it. A local helper applies the queued sidebar changes after the app exits. If the computer shut down first, the next sync queues the layout again. You can also quit the desktop app and run `python3 sync.py sync` from the plugin directory (`py sync.py sync` on Windows). Custom sections appear under the signed-in ChatGPT account. A chat that arrives before its complete history is available gets its assignments on a subsequent pass.
+
+## Link an existing project
+
+On the desktop that already has a checkout, ask **“Link my local TARTARUS to the shared TARTARUS and use this folder.”** Give the folder path on that computer. For the cleanest first merge, sync the source, wait for the shared project to arrive, then link before applying the receiving sidebar preview. The same chat history can resume in different local checkouts on Windows and Linux. Links use explicit IDs. A rootless imported duplicate can be consolidated, and an independently configured project with its own files is preserved. The shared link record contains project IDs. Checkout paths stay in device configuration.
+
+## Delivery and sharing
+
+- Ask **“Name this sync device Windows PC”** on the receiver. On the sender, ask **“Has Windows PC received this chat?”** A receipt refers to the last completed chat revision that the receiving plugin verified. The next local sync reads receipts delivered by your folder provider. A new reply needs a new receipt.
+- With **Codex Desktop Mods 0.7.0** applied, hover over a local sidebar chat title for its delivery status. A check mark means a peer acknowledged the last synced revision. A clock or exclamation mark flags a busy chat or a conflict.
+- Ask **“Keep this chat on this device”** or **“Keep the CAPRICA project local only.”** The rule covers future transfers on this device and reports whether data was already saved to the shared folder. Earlier copies remain on peers and in the vault. You can enable sharing again later.
+
+## Preview, undo, pins and order
+
+The first incoming desktop sidebar merge shows the proposed changes before applying them. Ask **“Preview sidebar sync”**, then **“Apply that preview”**. Chat histories can arrive while sidebar changes await review. Later sync passes apply automatically. Ask **“Undo the last sidebar sync”** to roll back the latest received batch on this computer. Undo leaves the chats available and pauses sidebar and order sync. A newer local edit can prevent the rollback. Fully quit the desktop app when a change is queued for exit.
+
+Ask **“Sync my pins and sidebar order”** on each participating desktop after enabling sidebar sync. This shares local chat pins and relative project, section and pinned-chat order. Other devices can keep their own layout.
+
+The equivalent commands in the plugin directory are `python3 sync.py projects`, `link LOCAL_ID SHARED_ID FOLDER`, `name "Windows PC"`, `receipt CHAT_ID`, `local-only chat|project ID on|off`, `preview`, `apply-preview BATCH_ID`, `undo` and `order on|off`. Use `py sync.py` on Windows.
 
 ## Sync sidebar colours
 

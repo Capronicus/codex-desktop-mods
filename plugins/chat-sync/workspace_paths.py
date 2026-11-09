@@ -36,7 +36,7 @@ def local_dir(value):
         return False
 
 
-def local_record(raw, fallback, known_dirs):
+def local_record(raw, fallback, known_dirs, checkout=False):
     if raw.startswith(PREFIX):
         raise ValueError("Unexpected local workspace marker in shared history")
     record = json.loads(raw)
@@ -54,13 +54,13 @@ def local_record(raw, fallback, known_dirs):
         return known_dirs[value]
 
     changed = False
-    if target.get("cwd") and not available(target["cwd"]):
+    if target.get("cwd") and (not available(target["cwd"]) or (checkout and Path(target["cwd"]) != fallback and fallback not in Path(target["cwd"]).parents)):
         fallback.mkdir(parents=True, exist_ok=True)
         target["cwd"] = str(fallback)
         changed = True
     roots = target.get("runtime_workspace_roots")
     if isinstance(roots, list):
-        valid = [r for r in roots if available(r)]
+        valid = [str(fallback)] if checkout and roots else [r for r in roots if available(r)]
         if valid != roots:
             target["runtime_workspace_roots"] = valid
             changed = True
@@ -89,7 +89,7 @@ def wire_record(raw):
     return original
 
 
-def pieces(stream, fallback=None):
+def pieces(stream, fallback=None, checkout=False):
     """Pass long tool records in bounded pieces. Only buffer structured metadata."""
     at_start = True
     known_dirs = {}
@@ -109,7 +109,7 @@ def pieces(stream, fallback=None):
                 if first or local:
                     raise ValueError("Oversized or incomplete workspace metadata record")
             elif fallback is not None:
-                part = local_record(part, fallback, known_dirs)
+                part = local_record(part, fallback, known_dirs, checkout)
             else:
                 part = wire_record(part)
         yield part

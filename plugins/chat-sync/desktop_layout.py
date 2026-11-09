@@ -73,7 +73,26 @@ class Layout:
     def apply(self, changes):
         """Use field-level preconditions so edits made after sync win on this device."""
         eligible = {k.split("/")[1] for k in changes if k.startswith("chat-")}
+        import ordering
+
+        for key in ("order/pins",):
+            if key in changes:
+                eligible.update(changes[key][1])
+                eligible.update(changes[key][0] or [])
         current = self.observed(eligible)
+        cached = set(
+            self.data.get("electron-persisted-atom-state", {}).get(
+                "app-server-pinned-thread-order-v1", []
+            )
+        )
+        current.update(ordering.observe(self, eligible, cached))
+        for key in changes:
+            kind, ident = key.split("/")
+            if kind == "checkout":
+                current[key] = self.projects.get(ident, {}).get("rootPaths", [])
+            if kind == "alias":
+                current[key] = ident if ident in self.projects else changes[key][1]
+
         applied = {}
         projects = self.data.setdefault("local-projects", {})
         section_state = {}
@@ -88,13 +107,24 @@ class Layout:
         by_id = {s["id"]: s for s in sections}
         now = int(time.time() * 1000)
         # Groups exist before memberships are applied. Independent local ordering is retained.
-        for key in sorted(changes, key=lambda k: k.startswith("chat-")):
+        for key in sorted(
+            changes,
+            key=lambda k: 3
+            if k.startswith("order/")
+            else 2
+            if k.startswith("alias/")
+            else int(k.startswith(("chat-", "checkout/"))),
+        ):
             before, value, native = changes[key]
             kind, ident = key.split("/")
+            if kind == "chat-pin" and current.get(key) == value:
+                ordering.project(self, key, value)
             if current.get(key) == value and not self.needs_mapping(kind, ident, native):
                 applied[key] = value
                 continue
-            if current.get(key) != before:
+            if current.get(key) != before and not (
+                kind == "order" and set(current.get(key, [])) <= set(before or []) | set(value)
+            ):
                 continue
             if kind == "project":
                 project = projects.setdefault(
@@ -117,6 +147,38 @@ class Layout:
                         order.append("custom:" + ident)
                 by_id[ident]["name"] = value
                 by_id[ident].setdefault("hostSectionIds", {})["local"] = native
+            elif kind in ("order", "chat-pin"):
+                ordering.project(self, key, value)
+            elif kind == "checkout":
+                if ident not in projects or not Path(value).is_dir():
+                    continue
+                projects[ident]["rootPaths"] = [
+                    value,
+                    *[r for r in projects[ident].get("rootPaths", []) if r != value],
+                ]
+            elif kind == "alias":
+                old = projects.get(ident)
+                if (
+                    old is None
+                    or value not in projects
+                    or old.get("rootPaths")
+                    or old.get("chatGptBacking")
+                ):
+                    continue
+                for row in self.data.get("thread-project-assignments", {}).values():
+                    if row.get("projectKind") == "local" and row.get("projectId") == ident:
+                        row["projectId"] = value
+                del projects[ident]
+                self.data.get("app-server-project-id-by-legacy-project-id-by-host", {}).get(
+                    self.host, {}
+                ).pop(ident, None)
+                order = self.data.get("project-order", [])
+                if ident in order:
+                    order.remove(ident)
+                atoms = self.data.get("electron-persisted-atom-state", {})
+                sequence = atoms.get("unified-sidebar-project-order-v1", [])
+                if "codex:project:" + ident in sequence:
+                    sequence.remove("codex:project:" + ident)
             elif kind == "chat-project":
                 assignments = self.data.setdefault("thread-project-assignments", {})
                 if key not in current or (value and value not in projects):
@@ -237,6 +299,11 @@ def apply_pending(home):
         return True
     if desktop_running():
         return False
+    if plan.get("undo"):
+        import batches
+
+        batches.undo_locked(home, cfg)
+        return True
     layout = Layout(home)
     if not layout.enabled or layout.account != plan["account"]:
         return False
@@ -244,13 +311,22 @@ def apply_pending(home):
     if layout.path.read_bytes() != layout.original or desktop_running():
         return False
     updated = layout.observed({k.split("/")[1] for k in acknowledged if k.startswith("chat-")})
-    if any(updated.get(k) != v for k, v in acknowledged.items()):
+    if any(
+        updated.get(k) != v
+        for k, v in acknowledged.items()
+        if k.startswith(("project/", "section/", "chat-project/", "chat-section/"))
+    ):
         raise ValueError("The desktop sidebar layout could not be verified")
     if acknowledged:
         if layout.data != json.loads(layout.original):
             sync.atomic(directory / "sidebar-layout-backup.json", layout.original)
             if layout.path.read_bytes() != layout.original or desktop_running():
                 return False
+            import batches
+
+            batches.capture(
+                home, cfg["device"], plan.get("batch_id"), json.loads(layout.original), layout.data
+            )
             sync.atomic(layout.path, sync.encode(layout.data))
         state_path = directory / ("sidebar-" + cfg["device"] + ".json")
         state = sync.read_json(state_path)
@@ -260,17 +336,26 @@ def apply_pending(home):
     return True
 
 
-def queue(home, device, layout, changes):
+def queue(home, device, layout, changes, batch_id=None):
     directory = home / "chat-sync"
     path = directory / QUEUE
     if not changes:
         path.unlink(missing_ok=True)
         return False
     sync.atomic(
-        path, sync.encode({"device": device, "account": layout.account, "changes": changes})
+        path,
+        sync.encode(
+            {"device": device, "account": layout.account, "changes": changes, "batch_id": batch_id}
+        ),
     )
     if apply_pending(home):
         return False
+    start_worker(home)
+    return True
+
+
+def start_worker(home):
+    directory = home / "chat-sync"
     # A single short-lived helper finishes the pending local layout when the app exits.
     try:
         with sync.lock(directory / "sidebar-exit.lock"):

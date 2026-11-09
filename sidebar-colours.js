@@ -2,6 +2,7 @@
 // so edits to different items in separate windows cannot overwrite each other.
 function createSidebarColours({preferencesReady, getPreference, setPreference, preferenceKeys, watchPreferencePrefix}) {
   installForkLines();
+  installDeliveryStatus();
   const prefix = 'codex.sidebar-colours.v1/';
   const projectAttr = 'data-app-action-sidebar-project-id';
   const projectListAttr = 'data-app-action-sidebar-project-list-id';
@@ -542,4 +543,47 @@ function installForkLines() {
   },{capture:true,passive:true});
   window.addEventListener('resize',schedule);
   schedule();
+}
+
+function installDeliveryStatus() {
+  const read=window.localChatDetails?.delivery;
+  if (!read) return;
+  const style=document.createElement('style');
+  style.textContent=`
+    [data-csc-delivery] [data-csc-chat-label]::after {content:attr(data-sync-mark);font-size:.78em;margin-inline-start:.4em;opacity:0}
+    [data-csc-delivery]:is(:hover,:focus-within) [data-csc-chat-label]::after,
+    [data-csc-delivery="busy"] [data-csc-chat-label]::after,
+    [data-csc-delivery="conflict"] [data-csc-chat-label]::after {opacity:.8}
+  `;
+  document.head.append(style);
+  let busy=false;
+  const names={saved:'Saved to sync folder',busy:'Waiting for this chat to close',conflict:'Two desktops edited this chat',
+    local_only:'Kept on this device',waiting:'Waiting for sync files'};
+  async function update(){
+    if (document.hidden || busy) return;
+    busy=true;
+    try {
+      const rows=new Map();
+      for (const row of document.querySelectorAll('[data-csc-chat-key]')){
+        const id=/^(?:codex:thread:)?local:([a-f0-9-]{36})$/.exec(row.getAttribute('data-csc-chat-key'))?.[1];
+        if (id){if (!rows.has(id)) rows.set(id,[]);rows.get(id).push(row);}
+      }
+      const ids=[...rows.keys()];
+      for(let n=0;n<ids.length;n+=128){
+        const batch=ids.slice(n,n+128), records=await read(batch);
+        for (const id of batch) for (const row of rows.get(id)){
+          const label=row.querySelector('[data-csc-chat-label]');if(!label)continue;
+          const r=records[id];
+          if(!r){if(row.hasAttribute('data-csc-delivery')){row.removeAttribute('data-csc-delivery');label.removeAttribute('data-sync-mark');if(label.title===label.dataset.syncTitle)label.removeAttribute('title');delete label.dataset.syncTitle;}continue;}
+          const received=(r.received_by||[]).map(p=>p.name), waiting=(r.waiting_on||[]).map(p=>p.name);
+          const message=[names[r.status] || ('Last synced version received by '+received.join(', ')), ...(waiting.length?['Waiting for '+waiting.join(', ')+' to close the chat']:[])].join(' · ');
+          row.dataset.cscDelivery=waiting.length?'busy':r.status;
+          label.dataset.syncMark=({received:'✓',busy:'◷',conflict:'!',local_only:'⌂'})[row.dataset.cscDelivery]||'·';
+          label.title=message;label.dataset.syncTitle=message;
+        }
+      }
+    } finally {busy=false;}
+  }
+  const refresh=()=>update().catch(()=>{});
+  window.setInterval(refresh,5000);window.addEventListener('focus',refresh);refresh();
 }
