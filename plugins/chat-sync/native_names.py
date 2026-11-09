@@ -7,30 +7,44 @@ import subprocess
 from pathlib import Path
 
 
+def windows_store_cli():
+    import ctypes as ct
+
+    kernel = ct.WinDLL("kernel32")
+    sizep = ct.POINTER(ct.c_uint32)
+    names_api = kernel.GetPackagesByPackageFamily
+    names_api.argtypes = [ct.c_wchar_p, sizep, ct.POINTER(ct.c_wchar_p), sizep, ct.c_wchar_p]
+    path_api = kernel.GetPackagePathByFullName
+    path_api.argtypes = [ct.c_wchar_p, sizep, ct.c_wchar_p]
+    family = "OpenAI.Codex_2p2nqsd0c76g0"
+    count, size = ct.c_uint32(), ct.c_uint32()
+    more_space = 122  # ERROR_INSUFFICIENT_BUFFER
+    if names_api(family, ct.byref(count), None, ct.byref(size), None) != more_space:
+        return None
+    names = (ct.c_wchar_p * count.value)()
+    storage = ct.create_unicode_buffer(size.value)
+    if names_api(family, ct.byref(count), names, ct.byref(size), storage) != 0:
+        return None
+    for name in names[:count.value]:
+        length = ct.c_uint32()
+        if path_api(name, ct.byref(length), None) == more_space:
+            folder = ct.create_unicode_buffer(length.value)
+            if path_api(name, ct.byref(length), folder) == 0:
+                exe = Path(folder.value) / "app/resources/codex.exe"
+                if exe.is_file():
+                    return str(exe)
+    return None
+
+
 def codex_executable():
     for key in ("CODEX_CHAT_SYNC_CLI", "CODEX_APP_RUNTIME_CLI_PATH"):
         value = os.environ.get(key)
         if value and Path(value).is_file():
             return value
     if os.name == "nt":
-        # The Store app may be installed without a separate CLI on PATH.
-        powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-        script = (
-            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); "
-            "(Get-AppxPackage -Name OpenAI.Codex | "
-            "Where-Object PackageFamilyName -eq 'OpenAI.Codex_2p2nqsd0c76g0' | "
-            "Sort-Object Version -Descending | Select-Object -First 1).InstallLocation"
-        )
-        result = subprocess.run(
-            [str(powershell), "-NoProfile", "-NonInteractive", "-Command", script],
-            capture_output=True, encoding="utf-8", errors="replace", timeout=20,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-        root = result.stdout.strip()
-        if root:
-            exe = Path(root) / "app/resources/codex.exe"
-            if exe.is_file():
-                return str(exe)
+        bundled = windows_store_cli()
+        if bundled:
+            return bundled
     candidates = [
         "/usr/lib/chatgpt/resources/codex",
         "/Applications/Codex.app/Contents/Resources/codex",

@@ -74,6 +74,14 @@ def exercise(stage, vault, incoming, home):
         if stage == "reply":
             other = start(app)
             app.turn(other, WINDOWS_CHAT)
+            # A running app owns this chat's writer lock, including on Windows.
+            sys.path.insert(0, str(ROOT.parent))
+            import sync as engine
+            try:
+                with engine.native_writer(other):
+                    raise AssertionError("Acquired a writer lock owned by Codex")
+            except engine.Busy:
+                pass
             result = sync(call)
             assert result["exported"] == 1 and result["imported"] == 1
             tid = find_chat(app, NAME)
