@@ -1,5 +1,6 @@
 """Install the mods in a per-user copy of the Windows ChatGPT desktop app."""
 import argparse
+import errno
 from contextlib import contextmanager
 import hashlib
 import importlib
@@ -12,6 +13,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 
 patcher = importlib.import_module('sidebar-colours')
 SOURCE = Path(__file__).resolve().parent
@@ -132,8 +134,16 @@ def locked():
     root.mkdir(parents=True, exist_ok=True)
     with (root / 'install.lock').open('a+b') as lock:
         lock.seek(0)
-        # LK_LOCK retries once a second for ten seconds. Never race another rebuild.
-        msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+        # Store updates can take longer than the ten-second LK_LOCK limit.
+        deadline = time.monotonic() + 240
+        while True:
+            try:
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.5)
         try:
             yield root
         finally:
@@ -205,9 +215,31 @@ def prune(root, keep=None):
     old = [p for p in directory.iterdir() if REV.fullmatch(p.name) and p != keep and (p / '.complete').is_file()]
     if old and running_copy(root):
         return False
-    for p in old:
-        shutil.rmtree(p)
-    return True
+    done = True
+    for path in old:
+        try:
+            path.rename(directory / ('retired-' + path.name))
+        except OSError as exc:
+            if getattr(exc, 'winerror', None) not in (5, 32, 33, 183):
+                raise
+            done = False
+    for path in directory.glob('retired-*'):
+        if REV.fullmatch(path.name[8:]):
+            try:
+                shutil.rmtree(path)
+            except OSError as exc:
+                if getattr(exc, 'winerror', None) not in (5, 32, 33):
+                    raise
+                done = False
+    return done
+
+
+def prune_unused(root, keep):
+    # A denied process query or a locked old helper should not block the new app.
+    try:
+        prune(root, keep)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
 
 
 def status():
@@ -235,7 +267,7 @@ def apply():
         dest = runtime(*pkg, root)
         tools = install_tools(root)
         save_shortcut(root, tools, pkg[0] / EXE)
-        prune(root, dest)
+        prune_unused(root, dest)
     return 'Installed. Fully quit ChatGPT, then open ChatGPT (Desktop Mods) from Start.'
 
 
@@ -271,7 +303,7 @@ def launch():
             if not pkg:
                 raise ValueError('The Windows ChatGPT package is unavailable.')
             dest = runtime(*pkg, root)
-            prune(root, dest)
+            prune_unused(root, dest)
             start_packaged(dest / EXE)
     except (OSError, ValueError, KeyError, struct.error, subprocess.SubprocessError) as exc:
         import ctypes

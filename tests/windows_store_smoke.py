@@ -28,9 +28,13 @@ def main():
     exe = mods.runtime(*pkg, mods.data_dir()) / mods.EXE
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         profile = Path(tmp) / 'profile'
-        home = Path(tmp) / 'codex'
+        # Package activation starts with the registered account's environment.
+        # Use the fresh CI account's normal Codex home to exercise actual discovery.
+        home = Path.home() / '.codex'
         profile.mkdir()
-        home.mkdir()
+        home.mkdir(exist_ok=True)
+        if any((home/name).exists() for name in ('auth.json','.codex-global-state.json','config.toml')):
+            raise RuntimeError('Expected an unused runner profile.')
         project = '01a1aa55-1234-7000-8000-000000000001'
         now = int(time.time() * 1000)
         (home/'auth.json').write_text(json.dumps({'auth_mode':'apikey','OPENAI_API_KEY':'local-offline-fixture'}))
@@ -44,7 +48,7 @@ def main():
             'local-projects':{project:{'id':project,'name':'Windows QA','rootPaths':[tmp],'createdAt':now,'updatedAt':now}},
             'project-order':[project]}))
         archive = home/'archived_sessions'
-        archive.mkdir()
+        archive.mkdir(exist_ok=True)
         parent, thread, turn = ['01a1aa55-1234-7000-8000-0000000000'+suffix for suffix in ['10','11','12']]
         rows = [('session_meta',{'id':thread,'forked_from_id':parent}),
                 ('event_msg',{'type':'task_started','turn_id':turn}),
