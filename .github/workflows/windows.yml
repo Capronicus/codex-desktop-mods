@@ -2,7 +2,7 @@ name: Windows desktop mods
 on:
   workflow_dispatch:
   push:
-    branches: [main, windows-port]
+    branches: [main, windows-port, codex/sidebar-palette]
 permissions:
   contents: read
 jobs:

@@ -44,10 +44,15 @@ async function probe(url) {
     await evaluate(`${project}.dispatchEvent(new MouseEvent('contextmenu',{shiftKey:true,bubbles:true,cancelable:true}))`);
     for (let i = 0; i < 30 && !await evaluate("!!document.querySelector('dialog.csc-picker[open]')"); i++) await wait(100);
     assert.equal(await evaluate("document.querySelector('dialog.csc-picker h2')?.innerText"), 'Project colour');
+    await evaluate("document.querySelector('dialog.csc-picker input[type=checkbox]').click()");
+    await evaluate("Array.from(document.querySelectorAll('dialog button')).find(b => b.textContent === 'Save swatch').click()");
     await evaluate("document.querySelector('dialog.csc-picker [aria-label=Violet]').click()");
     for (let i = 0; i < 20; i++) {
       if (await evaluate(`getComputedStyle(${project}.querySelector('[data-csc-project-label]') || ${project}).color === 'rgb(154, 119, 211)'`)) {
-        console.log('Opened the native Windows project picker and applied Violet.');
+        const prefs = new Map(await evaluate("(async () => (await window.localChatDetails.colours('read',[],null)).entries)()"));
+        assert.ok([...prefs].some(([k,v])=>k.startsWith('override-project/') && v==='on'));
+        assert.ok([...prefs.keys()].some(k=>k.startsWith('swatch/')));
+        console.log('Verified native Windows picker, group override and saved swatch.');
         return;
       }
       await wait(150);

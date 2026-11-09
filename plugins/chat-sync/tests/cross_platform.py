@@ -47,6 +47,10 @@ def plugin(app):
     return call
 
 
+def desktop_colours(stage, tid):
+    subprocess.run(["node", str(ROOT / "colour_bridge.cjs"), stage, tid], check=True)
+
+
 def sync(call):
     result = call("sync_chats")
     print("Sync", result, flush=True)
@@ -64,11 +68,20 @@ def exercise(stage, vault, incoming, home):
         assert not (home / "chat-sync/config.json").exists()
         call("configure_chat_sync", folder=str(vault), automatic=False)
         assert (home / "chat-sync/config.json").is_file()
+        assert call("chat_sync_status")["colours"] is False
+        assert call("set_colour_sync", enabled=True)["colours"] is True
         if stage == "seed":
             tid = start(app)
+            desktop_colours("seed", tid)
+            (home / ".codex-global-state.json").write_text(json.dumps({
+                "thread-project-assignments": {tid: {"projectId": "fixture"}},
+                "private-sentinel": "THIS-MUST-STAY-LOCAL",
+            }))
             app.turn(tid, FIRST)
             app.call("thread/name/set", {"threadId": tid, "name": NAME})
             assert sync(call)["exported"] == 1
+            head = next((vault / "codex-chat-sync-v1/colours-v1").glob("*.json"))
+            assert "THIS-MUST-STAY-LOCAL" not in head.read_text()
             return
         if stage == "reply":
             other = start(app)
@@ -89,6 +102,7 @@ def exercise(stage, vault, incoming, home):
                 assert sync(call)["pending_names"] == 0, "Windows could not apply the imported title"
             tid = find_chat(app, NAME)
             assert FIRST in history(app, tid)
+            desktop_colours("reply", tid)
             app.turn(tid, SECOND)
             assert sync(call)["exported"] >= 1
             return
@@ -104,6 +118,7 @@ def exercise(stage, vault, incoming, home):
         call = plugin(app)
         assert sync(call)["updated"] == 1
         assert find_chat(app, NAME) == tid
+        desktop_colours("verify", tid)
         turns = history(app, tid)
         assert FIRST in turns and SECOND in turns and "Birch metadata verified." in turns
         assert WINDOWS_CHAT in history(app, find_chat(app, WINDOWS_CHAT))

@@ -46,6 +46,24 @@ async function run() {
     const native = (await colours()).at(-1);
     assert.equal(await title.evaluate(n => getComputedStyle(n).color), violet);
     assert.deepEqual(await colours(), [violet,project,chat,violet,project,chat,native]);
+    const groupPicker = async () => {
+      await title.click({modifiers:['Shift'],button:'right'});
+      await page.locator('dialog[open]').waitFor();
+    };
+    await groupPicker();
+    await page.getByRole('checkbox',{name:'Override all chat colours'}).check();
+    assert.deepEqual(await colours(), [violet,violet,violet,violet,violet,violet,native]);
+    await page.getByRole('button',{name:'Save swatch'}).click();
+    await page.getByRole('button',{name:'Cancel'}).click();
+    await groupPicker();
+    await page.getByRole('checkbox',{name:'Override all chat colours'}).uncheck();
+    assert.deepEqual(await colours(), [violet,project,chat,violet,project,chat,native]);
+    await page.getByRole('button',{name:'Use #9a77d3'}).click();
+    await groupPicker();
+    await page.getByRole('button',{name:'Remove…'}).click();
+    await page.getByRole('button',{name:'Remove #9a77d3'}).click();
+    assert.equal(await page.getByText('Saved colours',{exact:true}).count(),0);
+    await page.getByRole('button',{name:'Cancel'}).click();
     await page.locator('[data-sidebar-project-container-id] section').evaluate(n => {
       n.setAttribute('data-app-action-sidebar-section-heading', 'Renamed section');
       n.querySelector('button span').textContent = 'Renamed section';

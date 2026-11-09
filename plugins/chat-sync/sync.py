@@ -111,6 +111,7 @@ def setup(folder, automatic=False):
             "folder": str(base),
             "device": old.get("device") or str(uuid.uuid4()),
             "automatic": automatic,
+            "colours": bool(old.get("colours")),
         }
         vault.mkdir(mode=0o700, exist_ok=True)
         atomic(CONFIG, encode(cfg))
@@ -124,8 +125,19 @@ def status():
         "folder": cfg and cfg["folder"],
         "device": cfg and cfg["device"],
         "automatic": bool(cfg and cfg["automatic"]),
+        "colours": bool(cfg and cfg.get("colours")),
         "last_run": read_json(STATE / "last.json"),
     }
+
+
+def set_colours(enabled):
+    with lock(STATE / "sync.lock"):
+        cfg = read_json(CONFIG)
+        if not cfg:
+            raise ValueError("Choose a private chat sync folder first.")
+        cfg["colours"] = enabled
+        atomic(CONFIG, encode(cfg))
+    return status()
 
 
 def disable():
@@ -141,7 +153,10 @@ def catalog():
     result = {}
     with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as conn:
         conn.row_factory = sqlite3.Row
-        for row in conn.execute("SELECT id, rollout_path, name, archived, source, cwd FROM threads"):
+        columns = "id, rollout_path, name, archived, source, cwd"
+        if any(info[1] == "project_id" for info in conn.execute("PRAGMA table_info(threads)")):
+            columns += ", project_id"
+        for row in conn.execute("SELECT " + columns + " FROM threads"):
             if not UUID.fullmatch(row["id"]):
                 continue
             result[row["id"]] = dict(row)
@@ -627,6 +642,12 @@ def run(automatic=False):
             for tid, row in index.items()
             if row["source"] in ("cli", "vscode", "appServer", "app_server")
         )
+        if cfg.get("colours"):
+            import colours
+            try:
+                stats["colours"] = colours.exchange(HOME, vault, device, index, atomic, encode)
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                stats["colours"] = {"error": str(exc)}
         atomic(STATE / "last.json", encode(stats))
         return stats
 

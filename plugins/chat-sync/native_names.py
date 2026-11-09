@@ -91,7 +91,7 @@ def apply_through_api(names, home):
 
     done = []
     try:
-        if not call(1, "initialize", {"clientInfo": {"name": "chat_sync", "version": "0.1.1"}}):
+        if not call(1, "initialize", {"clientInfo": {"name": "chat_sync", "version": "0.2.0"}}):
             return done
         for i, (tid, name) in enumerate(names.items(), 2):
             if call(i * 2, "thread/read", {"threadId": tid}) and call(

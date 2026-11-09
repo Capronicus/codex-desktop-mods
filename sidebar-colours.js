@@ -14,7 +14,51 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
   const ownerAttr = 'data-csc-owner';
   const hex = /^#[0-9a-f]{6}$/i;
   let rules, dialog;
-  const ready = preferencesReady();
+  const bridge = window.localChatDetails?.colours;
+  let stored = new Map(), inheritedLinks = [], version = null, queue = Promise.resolve();
+  const portableKey = /^(project|section|chat|override-project|override-section|swatch)\/[A-Za-z0-9:_@.-]{1,256}$/;
+  function exchange(mode, entries = []) {
+    const next = queue.then(async () => {
+      const snapshot = await bridge(mode, entries, version);
+      if (snapshot) {
+        version = snapshot.version;
+        stored = new Map(snapshot.entries);
+        inheritedLinks = snapshot.inherited;
+        refresh();
+      }
+    });
+    queue = next.catch(() => {});
+    return next;
+  }
+  async function seed() {
+    const entries = [];
+    for (const full of preferenceKeys(prefix)) {
+      const id = full.slice(prefix.length), value = getPreference(full, null);
+      if (portableKey.test(id) && (hex.test(value) || (id.startsWith('override-') && value === 'on')))
+        entries.push([id,value]);
+    }
+    for (let i = 0; i < entries.length; i += 512) await exchange('seed', entries.slice(i,i+512));
+    if (!entries.length) await exchange('read');
+  }
+  const nativeReady = preferencesReady();
+  const ready = bridge ? nativeReady.then(seed).catch(() => {}) : nativeReady;
+  async function write(entries) {
+    if (bridge) {
+      // Retry migration after a transient database lock before accepting new edits.
+      if (version === null) await seed();
+      const supported = entries.filter(([id]) => portableKey.test(id));
+      if (supported.length) await exchange('write', supported);
+    }
+    for (const [id,value] of entries) setPreference(prefix + id, value ?? undefined);
+    refresh();
+  }
+  function poll() {
+    if (bridge && !document.hidden) ready.then(() => version === null ? seed() : exchange('read')).catch(() => {});
+  }
+  if (bridge) {
+    window.setInterval(poll, 5000);
+    window.addEventListener('focus', poll);
+  }
 
   const displayRules = document.createElement('style');
   displayRules.textContent = `
@@ -45,7 +89,9 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
       background:linear-gradient(to right,black,var(--csc-full)); box-shadow:inset 0 0 0 1px #8888; }
     .csc-brightness input::-webkit-slider-thumb { appearance:none; width:16px; height:16px; margin-top:-4px;
       border-radius:50%; background:var(--csc-selected); border:2px solid white; box-shadow:0 0 0 1px #222; }
-    .csc-footer { justify-content: space-between; }
+    .csc-footer, .csc-saved-heading { display:flex; align-items:center; justify-content:space-between; }
+    .csc-override { display:flex; gap:6px; align-items:center; }
+    .csc-custom { flex-wrap:wrap; }
     .csc-action { background: transparent; border-radius: 7px; padding: 5px 8px; color: inherit; font: inherit; }
     .csc-action:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
     [data-csc-chat-key][data-csc-activity-day] {
@@ -80,9 +126,15 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
   window.setInterval(() => { if (!document.hidden) updateClock(); }, 15 * 60 * 1000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) updateClock(); });
 
-  function key(kind, id) { return prefix + kind + '/' + id; }
   function attr(name, id) { return '[' + name + '="' + CSS.escape(id) + '"]'; }
-  function read(kind, id) { return id ? getPreference(key(kind, id), null) : null; }
+  function read(kind, id) {
+    if (!id) return null;
+    const name = kind + '/' + id;
+    return stored.has(name) ? stored.get(name) : getPreference(prefix + name, null);
+  }
+  function colourKeys() {
+    return new Set([...preferenceKeys(prefix)].filter(k => k.startsWith(prefix)).map(k => k.slice(prefix.length)).concat([...stored.keys()]));
+  }
 
   function chatRules(selectors, value) {
     return selectors.join(',') + '{--csc-row-base:' + value + '}' +
@@ -103,29 +155,36 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     return sections().find(section => section.itemKeys?.some(k => keys.includes(sectionChatKey(k))))?.id;
   }
   function refresh() {
-    const sectionRules = [], projects = [], chats = [];
+    const sectionRules = [], projects = [], chats = [], forcedProjects = [], forcedSections = [];
     const records = sections();
-    for (const k of preferenceKeys(prefix)) {
-      const value = getPreference(k, null);
-      if (!hex.test(value)) continue;
-      const parts = k.slice(prefix.length);
+    const linked = {project:new Map(), section:new Map()};
+    for (const {chat,project,section} of inheritedLinks) {
+      for (const [kind,id] of [['project',project],['section',section]]) {
+        if (!id) continue;
+        if (!linked[kind].has(id)) linked[kind].set(id, []);
+        linked[kind].get(id).push(attr(threadAttr,chat));
+      }
+    }
+    for (const parts of colourKeys()) {
       const split = parts.indexOf('/');
       const kind = parts.slice(0, split), id = parts.slice(split + 1);
-      if (!id || split < 0) continue;
+      const value = read(kind,id);
+      if (!id || !hex.test(value)) continue;
       if (kind === 'section') {
         const group = attr(sectionAttr, 'custom:' + id);
         sectionRules.push(group + ' ' + sectionToggle + '{color:' + value + ' !important}');
-        const members = [group + ' :where([' + threadAttr + '])'];
+        const members = [group + ' :where([' + threadAttr + '])', ...(linked.section.get(id) || [])];
         for (const raw of records.find(section => section.id === id)?.itemKeys || []) {
           const chat = sectionChatKey(raw);
           if (chat) members.push(attr(rawThreadAttr,chat), attr(threadAttr,chat));
         }
-        sectionRules.push(chatRules(members,value));
+        (read('override-section',id) === 'on' ? forcedSections : sectionRules).push(chatRules(members,value));
       } else if (kind === 'project') {
         projects.push(attr(projectAttr, id) + ' [data-csc-project-label]{color:' + value + ' !important}');
         const descendant = ' :where([' + threadAttr + '])';
-        projects.push(chatRules([attr(projectListAttr, id) + descendant,
-          attr('data-csc-project-group', id) + descendant, attr(ownerAttr, id)], value));
+        const members = [attr(projectListAttr,id) + descendant, attr('data-csc-project-group',id) + descendant,
+          attr(ownerAttr,id), ...(linked.project.get(id) || [])];
+        (read('override-project',id) === 'on' ? forcedProjects : projects).push(chatRules(members,value));
       } else if (kind === 'chat') {
         chats.push(chatRules([attr(threadAttr, id)], value));
       }
@@ -135,7 +194,7 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
       rules.id = 'codex-sidebar-colour-rules';
       document.head.append(rules);
     }
-    rules.textContent = sectionRules.concat(projects,chats).join('\n');
+    rules.textContent = sectionRules.concat(projects,chats,forcedProjects,forcedSections).join('\n');
   }
 
   const palette = [
@@ -156,7 +215,7 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     button.addEventListener('click', run);
     return button;
   }
-  function customPicker(initial, save) {
+  function customPicker(initial, save, saveSwatch) {
     const section = el('div');
     const wheel = el('div', 'csc-wheel');
     const mark = el('span', 'csc-wheel-mark');
@@ -239,7 +298,8 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     bar.oninput = () => { value = Number(bar.value) / 100; render(); };
     swatch.oninput = () => fromHex(swatch.value);
     fromHex(initial);
-    row.append(swatch, action('Apply custom colour', () => save(swatch.value)));
+    row.append(swatch, action('Apply custom colour', () => save(swatch.value)),
+      action('Save swatch', () => saveSwatch(swatch.value)));
     section.append(wheel, brightness, row);
     return section;
   }
@@ -253,11 +313,14 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     const savedId = () => section || project ? id : row?.getAttribute(threadAttr) || id;
     const title = section ? row?.querySelector('[data-app-action-sidebar-section-heading]')?.getAttribute('data-app-action-sidebar-section-heading') : row?.getAttribute('data-app-action-sidebar-' + (project ? 'project-label' : 'thread-title'))
       ?? row?.querySelector('[data-csc-chat-label]')?.textContent;
+    const hint = kind === 'chat' && inheritedLinks.find(link => link.chat === savedId());
     const owner = row?.closest('[data-csc-project-group]')?.getAttribute('data-csc-project-group')
-      || row?.getAttribute(ownerAttr) || row?.closest('[' + projectListAttr + ']')?.getAttribute(projectListAttr);
+      || row?.getAttribute(ownerAttr) || row?.closest('[' + projectListAttr + ']')?.getAttribute(projectListAttr) || hint?.project;
     const current = read(kind, savedId());
-    const sectionId = kind === 'chat' ? memberSection(row) : null;
-    const inherited = kind === 'chat' ? read('project',owner) || read('section',sectionId) : null;
+    const sectionId = kind === 'chat' ? memberSection(row) || hint?.section : null;
+    const forcedSection = read('override-section',sectionId) && read('section',sectionId);
+    const forcedProject = read('override-project',owner) && read('project',owner);
+    const inherited = kind === 'chat' ? forcedSection || read('project',owner) || read('section',sectionId) : null;
     const box = el('dialog', 'csc-picker');
     dialog = box;
     const heading = el('h2', null, section ? 'Section colour' : project ? 'Project colour' : 'Chat colour');
@@ -265,15 +328,34 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     box.setAttribute('aria-labelledby', heading.id);
     box.append(heading);
     if (title) box.append(el('p', null, title));
+    if (kind === 'chat' && (forcedSection || forcedProject))
+      box.append(el('p',null,'The ' + (forcedSection ? 'section' : 'project') + ' override controls this chat’s visible colour.'));
     const error = el('div');
     error.setAttribute('role', 'alert');
-    function save(value) {
-      try {
-        if (value === null) setPreference(key(kind, savedId()), undefined);
-        else if (hex.test(value)) setPreference(key(kind, savedId()), value);
-        else return;
-        box.close();
-      } catch { error.textContent = 'Could not save the colour in this profile.'; }
+    const setting = kind + '/' + savedId();
+    const force = 'override-' + setting;
+    async function change(entries) {
+      try { await write(entries); return true; }
+      catch { error.textContent = 'Could not save the colour in this profile.'; return false; }
+    }
+    async function save(value) {
+      if (value !== null && !hex.test(value)) return;
+      const entries = [[setting,value]];
+      if (value === null && (project || section)) entries.push([force,null]);
+      if (await change(entries)) box.close();
+    }
+    if (project || section) {
+      const label = el('label','csc-override');
+      const toggle = el('input');
+      toggle.type = 'checkbox';
+      toggle.checked = read('override-' + kind,id) === 'on';
+      toggle.onchange = async () => {
+        toggle.disabled = true;
+        if (!await change([[force,toggle.checked ? 'on' : null]])) toggle.checked = !toggle.checked;
+        toggle.disabled = false;
+      };
+      label.append(toggle, document.createTextNode(' Override all chat colours'));
+      box.append(label);
     }
     const grid = el('div', 'csc-grid');
     for (const [name, colour] of palette) {
@@ -284,12 +366,39 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
       swatch.style.backgroundColor = colour;
       grid.append(swatch);
     }
-    const customRow = customPicker(current || inherited || '#299e93', save);
+    const saved = el('div');
+    let removing = false;
+    function showSaved() {
+      saved.replaceChildren();
+      const keys = [...colourKeys()].filter(k => k.startsWith('swatch/') && read('swatch',k.slice(7))).sort();
+      if (!keys.length) { removing = false; return; }
+      const header = el('div','csc-saved-heading');
+      header.append(el('span',null,'Saved colours'), action(removing ? 'Done' : 'Remove…', () => {
+        removing = !removing; showSaved();
+      }));
+      const swatches = el('div','csc-grid');
+      for (const key of keys) {
+        const value = '#' + key.slice(7);
+        const button = action('', async () => {
+          if (!removing) return save(value);
+          if (await change([[key,null]])) showSaved();
+        });
+        button.title = (removing ? 'Remove ' : 'Use ') + value;
+        button.setAttribute('aria-label',button.title);
+        button.style.backgroundColor = value;
+        swatches.append(button);
+      }
+      saved.append(header,swatches);
+    }
+    showSaved();
+    const customRow = customPicker(current || inherited || '#299e93', save, async colour => {
+      if (await change([['swatch/' + colour.slice(1),colour]])) showSaved();
+    });
     const footer = el('div', 'csc-footer');
     footer.append(action(kind === 'chat' && owner && (read('project',owner) || !sectionId) ? 'Use project colour' :
       sectionId ? 'Use section colour' : 'Use default colour', () => save(null)),
       action('Cancel', () => box.close()));
-    box.append(grid, customRow, footer, error);
+    box.append(grid, saved, customRow, footer, error);
     box.addEventListener('close', () => box.remove(), {once: true});
     document.body.append(box);
     box.showModal();
@@ -337,8 +446,9 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     await ready;
     const old = read('chat', temporary);
     if (!hex.test(old)) return;
-    if (!read('chat', stable)) setPreference(key('chat', stable), old);
-    setPreference(key('chat', temporary), undefined);
+    const edits = [['chat/' + temporary,null]];
+    if (!read('chat',stable)) edits.push(['chat/' + stable,old]);
+    await write(edits).catch(() => {});
   }
   return {menuItem, migrate, activityDay};
 }

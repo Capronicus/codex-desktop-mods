@@ -22,6 +22,8 @@ codex plugin add codex-desktop-mods@capronicus-desktop-mods
 
 Refresh **Capronicus Desktop Mods** in Plugin Explorer on each desktop and install **Codex Chat Sync**. Open a new chat and ask **Check chat sync status**. To connect a device, choose the local path to the same private, available-offline folder in Nextcloud, OneDrive or Google Drive. Each computer can use a different path. Installation starts disconnected.
 
+With Desktop Mods 0.6.0 and Chat Sync 0.2.0 installed on each computer, ask **Enable colour sync** in the configured Chat Sync plugin. This also exchanges saved swatches and group override settings.
+
 Read the [setup and conflict recovery guide](plugins/chat-sync/README.md).
 
 ## Windows
@@ -40,6 +42,8 @@ Right-click a project, chat or custom section heading and choose **Project colou
 
 - A project’s chats inherit its colour, including when they appear in Recents. Pick a colour for one chat to override it, or choose **Use project colour** to restore inheritance.
 - A custom section colours its heading and any chats with no individual or project colour. Resetting an override restores the next colour in that order. The section colour follows its members into Recents.
+- Enable **Override all chat colours** in a project or section picker to give all its chats the group colour, including chats in Recents and future members. Switch it off to reveal individual colours again. A section override takes priority when both groups have one.
+- Use the wheel and **Save swatch** to keep a colour for any picker. Click a saved swatch to apply it. Use **Remove…** in Saved colours to delete one.
 - A thin line in the sidebar gutter joins a local chat to its branch when both are visible in the same list. It reads the saved parent ID and follows the native sidebar order.
 - The project title keeps its chosen colour. For the first day after an update, a chat title shows its exact project colour or its individual override. It gradually dims to 75% brightness by day 14, keeping the same hue.
 - A thin outline marks pinned chats in light and dark themes.

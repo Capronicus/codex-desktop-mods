@@ -1,5 +1,5 @@
 // Private to the desktop main process. The renderer can request numeric metadata
-// for local turn IDs. It cannot supply paths, read message bodies or write files.
+// for local turn IDs. Colour IPC is restricted to the mod’s preference database.
 ;(() => {
   const {ipcMain} = require('electron');
   const fs = require('node:fs/promises');
@@ -151,6 +151,53 @@
     } finally { raw.destroy(); stream.destroy(); }
     return undefined;
   }
+
+  let colours;
+  function colourDB() {
+    if (colours) return colours;
+    const {DatabaseSync} = require('node:sqlite');
+    const db = new DatabaseSync(path.join(home, 'sidebar-colours.sqlite'));
+    try {
+      db.exec(`PRAGMA busy_timeout=300; PRAGMA journal_mode=WAL;
+        CREATE TABLE IF NOT EXISTS colours (key TEXT PRIMARY KEY, value TEXT, rev INTEGER NOT NULL, author TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS identity (id INTEGER PRIMARY KEY CHECK(id=1), author TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS inherited (chat TEXT PRIMARY KEY, project TEXT, section TEXT);`);
+      db.prepare('INSERT OR IGNORE INTO identity VALUES (1,?)').run(require('node:crypto').randomUUID());
+      colours = db;
+      return db;
+    } catch (error) { db.close(); throw error; }
+  }
+  function validEdit(entry) {
+    if (!Array.isArray(entry) || entry.length !== 2) return false;
+    const [key, value] = entry;
+    if (typeof key !== 'string' || !/^(?:project|section|chat|override-project|override-section|swatch)\/[A-Za-z0-9:_@.-]{1,256}$/.test(key)) return false;
+    if (key.startsWith('swatch/')) return /^swatch\/[a-f0-9]{6}$/.test(key) && (value === null || value === '#' + key.slice(7));
+    return value === null || (key.startsWith('override-') ? value === 'on' :
+      typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value));
+  }
+  ipcMain.handle('local-sidebar-colours:preferences', (event, mode, entries, previous) => {
+    const frame = event.senderFrame;
+    if (!frame || frame !== event.sender.mainFrame || !/^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(frame.url) ||
+        !['read','seed','write'].includes(mode) || !Array.isArray(entries) || entries.length > 512 ||
+        (mode === 'read' && entries.length) || !entries.every(validEdit)) throw new Error('Invalid colour preference request');
+    const db = colourDB();
+    if (entries.length) {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const author = db.prepare('SELECT author FROM identity WHERE id=1').get().author;
+        const rev = mode === 'seed' ? 0 : db.prepare('SELECT COALESCE(MAX(rev),0)+1 AS next FROM colours').get().next;
+        const upsert = db.prepare(mode === 'seed' ? 'INSERT OR IGNORE INTO colours VALUES (?,?,?,?)' :
+          'INSERT OR REPLACE INTO colours VALUES (?,?,?,?)');
+        for (const [key,value] of entries) upsert.run(key,value,rev,author);
+        db.exec('COMMIT');
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+    }
+    const version = db.prepare('PRAGMA data_version').get().data_version + ':' +
+      db.prepare('SELECT total_changes() AS n').get().n;
+    if (previous === version) return null;
+    return {version, entries:db.prepare('SELECT key,value FROM colours').all().map(r=>[r.key,r.value]),
+      inherited:db.prepare('SELECT chat,project,section FROM inherited').all()};
+  });
 
   ipcMain.handle('local-chat-details:fork-parents', async (event, ids) => {
     const frame = event.senderFrame;

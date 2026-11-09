@@ -17,7 +17,13 @@ The first sync takes the union of eligible local Codex chats. It includes chat m
 
 If one history continues the other, the receiver checks the complete snapshot and updates its local copy after Codex releases the thread. The plugin recognises the settings record Codex adds just by reopening a chat. If both desktops add independent turns, status reports a conflict with the two device IDs. To reunite the original chat, ask the desktop whose copy you want to replace to adopt the other device’s version. It saves its current conversation as a separate branch first. On the next sync both desktops get the same original chat and the preserved branch. Repeat on any additional desktop that made independent edits. You can also copy a version to a branch without replacing the original. The CLI equivalents are `adopt THREAD_ID DEVICE_ID` and `keep-branch THREAD_ID DEVICE_ID`.
 
-Projects, sidebar sections and colours, working directories, credentials, external attachments, repository files and regular cloud ChatGPT conversations are outside this plugin’s scope. When a saved working directory is unavailable on the receiving computer, the chat opens in a dedicated local folder. Select your local project checkout before asking Codex to edit its files. Sync preserves the original workspace metadata in the shared history.
+Project and section organization, working directories, credentials, external attachments, repository files and regular cloud ChatGPT conversations are outside this plugin’s scope. When a saved working directory is unavailable on the receiving computer, the chat opens in a dedicated local folder. Select your local project checkout before asking Codex to edit its files. Sync preserves the original workspace metadata in the shared history.
+
+## Sync sidebar colours
+
+Apply **Codex Desktop Mods 0.6.0** or later on each computer and open it once to import existing colours. After configuring the private sync folder, ask **Enable colour sync** on each device, then **Sync my chats now**. The CLI setting is `python3 sync.py colours on` or `colours off`. Colour sharing starts off on existing and new installations.
+
+The same sync pass carries individual, project and section colours, saved swatches, group overrides and resets. Matching IDs share settings. A chat can inherit its original project or section colour through its ID even when it appears only in Recents on the other desktop. Independently created groups with the same name keep separate IDs. The receiving mod refreshes within five seconds while visible. Concurrent edits to different swatches or chats coexist. Simultaneous edits to the same setting use a revision and device ID to select a consistent value.
 
 ## Storage and verification
 
