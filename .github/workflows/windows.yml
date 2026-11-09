@@ -24,5 +24,18 @@ jobs:
           curl.exe --fail --location --retry 2 https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix -o $pkg
           if ($LASTEXITCODE -ne 0) { throw 'Could not download the official MSIX.' }
           Add-AppxPackage -Path $pkg
+      - name: Install Chat Organizer from the marketplace in a fresh profile
+        shell: pwsh
+        run: |
+          $env:CODEX_HOME = Join-Path $env:RUNNER_TEMP 'organizer-profile'
+          $package = Get-AppxPackage -Name OpenAI.Codex
+          $codex = Join-Path $package.InstallLocation 'app/resources/codex.exe'
+          & $codex plugin marketplace add $env:GITHUB_WORKSPACE
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $codex plugin add chat-organizer@capronicus-desktop-mods
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $plugins = & $codex plugin list --json | ConvertFrom-Json
+          $organizer = $plugins.installed | Where-Object pluginId -eq 'chat-organizer@capronicus-desktop-mods'
+          if (-not $organizer.enabled) { throw 'Chat Organizer was not enabled.' }
       - name: Launch the patched Store build with a disposable profile
         run: python tests/windows_store_smoke.py

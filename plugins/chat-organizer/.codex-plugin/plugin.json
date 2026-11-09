@@ -1,0 +1,29 @@
+{
+  "name": "chat-organizer",
+  "version": "0.1.0",
+  "description": "Organize chats, projects and sidebar sections in Codex desktop.",
+  "author": {
+    "name": "Capronicus"
+  },
+  "interface": {
+    "displayName": "Chat Organizer",
+    "shortDescription": "Organize chats and projects",
+    "longDescription": "Find projectless chats, preview a sidebar cleanup and organize chats and projects with the built-in Codex desktop actions. Group chats in sections, move them between projects, pin, rename, archive or restore them.",
+    "developerName": "Capronicus",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "logo": "./assets/icon.png",
+    "composerIcon": "./assets/icon.png",
+    "defaultPrompt": [
+      "Find my projectless Codex chats and suggest where they belong.",
+      "Preview a cleanup of my sidebar.",
+      "Help me group related chats in a sidebar section."
+    ]
+  },
+  "onboardingSkill": "./skills/organize-sidebar/SKILL.md",
+  "requires_local_executor": true,
+  "skills": "./skills/"
+}

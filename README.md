@@ -18,6 +18,12 @@ codex plugin marketplace add Capronicus/codex-desktop-mods
 codex plugin add codex-desktop-mods@capronicus-desktop-mods
 ```
 
+## Install Chat Organizer on Windows or Linux
+
+In **Plugins**, refresh the **Capronicus Desktop Mods** marketplace. To add it for the first time, choose **Add → Add marketplace** and enter `https://github.com/Capronicus/codex-desktop-mods`. Select **Chat Organizer** and click **Install**. In a new chat, select the plugin and ask **“Preview a cleanup of my sidebar.”**
+
+Chat Organizer uses the sidebar actions built into Codex desktop. It installs independently and needs no desktop patch, Python or sync folder. Read the [Chat Organizer guide](plugins/chat-organizer/README.md) for examples.
+
 ## Sync chats between desktops
 
 Refresh **Capronicus Desktop Mods** in Plugin Explorer on each desktop and install **Codex Chat Sync**. Open a new chat and ask **Check chat sync status**. To connect a device, choose the local path to the same private, available-offline folder in Nextcloud, OneDrive or Google Drive. Each computer can use a different path. Installation starts disconnected.
