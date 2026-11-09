@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime
 import gzip
 import hashlib
+import itertools
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,8 @@ import subprocess
 import tempfile
 import time
 import uuid
+
+import workspace_paths
 
 BLOCK = 1024 * 1024
 HEX = re.compile(r"[0-9a-f]{64}")
@@ -138,7 +141,7 @@ def catalog():
     result = {}
     with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as conn:
         conn.row_factory = sqlite3.Row
-        for row in conn.execute("SELECT id, rollout_path, name, archived, source FROM threads"):
+        for row in conn.execute("SELECT id, rollout_path, name, archived, source, cwd FROM threads"):
             if not UUID.fullmatch(row["id"]):
                 continue
             result[row["id"]] = dict(row)
@@ -213,7 +216,8 @@ def snapshot(vault, tid, entry, name, known):
     if known and known.get("token") == token:
         return known
     with open_rollout(path) as stream:
-        first = stream.readline(8 * BLOCK + 1)
+        records = workspace_paths.pieces(stream)
+        first = next(records, b"")
         if len(first) > 8 * BLOCK or not first.endswith(b"\n"):
             raise ValueError("Unreadable conversation header")
         meta = json.loads(first)
@@ -222,18 +226,19 @@ def snapshot(vault, tid, entry, name, known):
             raise ValueError("Thread identity differs from filename")
         if info.get("source") not in ("cli", "vscode", "appServer", "app_server", None):
             return None
-        # Split the original bytes into fixed-size blocks, independent of line length.
         chunks, size, tail = [], 0, b""
-        acc = first
-        while acc:
-            if len(acc) < BLOCK:
-                acc += stream.read(BLOCK - len(acc))
-            data, acc = acc[:BLOCK], acc[BLOCK:]
-            chunks.append(put_block(vault, data))
-            size += len(data)
-            tail = (tail + data)[-65536:]
-            if not acc:
-                acc = stream.read(BLOCK)
+        pending = bytearray()
+        for part in itertools.chain((first,), records):
+            pending.extend(part)
+            while len(pending) >= BLOCK:
+                block = bytes(pending[:BLOCK])
+                del pending[:BLOCK]
+                chunks.append(put_block(vault, block))
+                tail = block[-65536:]
+            size += len(part)
+        if pending:
+            chunks.append(put_block(vault, bytes(pending)))
+            tail = (tail + pending)[-65536:]
     end = path.stat()
     if (end.st_ino, end.st_size, end.st_mtime_ns) != (
         st.st_ino,
@@ -436,7 +441,7 @@ def recover_projections():
             journal.unlink(missing_ok=True)
 
 
-def materialize(vault, man, local):
+def materialize(vault, man, local, cwd=None):
     tid = man["id"]
     diverged = local is not None and not is_prefix(vault, local["manifest"], man)
     with native_writer(tid):
@@ -461,21 +466,27 @@ def materialize(vault, man, local):
             raise ValueError("Unsafe local destination")
         fd, tmp = tempfile.mkstemp(prefix=".chat-sync-", dir=dest.parent)
         try:
-            with os.fdopen(fd, "w+b") as stream:
+            # Read and verify the portable bytes before exposing any local view.
+            fallback = STATE / "workspaces" / tid
+            if workspace_paths.local_dir(cwd):
+                fallback = Path(cwd)
+            with os.fdopen(fd, "wb") as out, tempfile.TemporaryFile(dir=dest.parent) as raw:
                 for i, key in enumerate(man["chunks"]):
                     data = block_data(vault, key)
                     if len(data) != min(BLOCK, man["size"] - i * BLOCK):
                         raise ValueError("Block length mismatch")
-                    stream.write(data)
-                stream.seek(0)
-                meta = json.loads(stream.readline(8 * BLOCK + 1))
+                    raw.write(data)
+                raw.seek(0)
+                meta = json.loads(raw.readline(8 * BLOCK + 1))
                 if meta.get("type") != "session_meta" or meta.get("payload", {}).get("id") != tid:
                     raise ValueError("Snapshot contains a different thread")
-                stream.seek(-1, os.SEEK_END)
-                if stream.read() != b"\n":
+                raw.seek(-1, os.SEEK_END)
+                if raw.read() != b"\n":
                     raise ValueError("Incomplete final record")
-                stream.flush()
-                os.fsync(stream.fileno())
+                raw.seek(0)
+                out.writelines(workspace_paths.pieces(raw, fallback))
+                out.flush()
+                os.fsync(out.fileno())
             if dest.suffix == ".zst":
                 compressed = tmp + ".zst"
                 try:
@@ -590,7 +601,7 @@ def run(automatic=False):
                         state[tid]["pending_name"] = best["name"]
                         state[tid].pop("token", None)
                     continue
-                materialize(vault, best, snap)
+                materialize(vault, best, snap, index.get(tid, {}).get("cwd"))
                 # Carry the name until the native app server indexes the rollout.
                 state[tid] = {"manifest": best, "pending_name": best.get("name")}
                 stats["updated" if current else "imported"] += 1
@@ -704,7 +715,7 @@ def adopt_history(tid, device):
             raise ValueError("These versions are compatible. Run an ordinary sync.")
         saved = save_branch(vault, cfg, tid, cfg["device"], own)
         # materialize rechecks the local fingerprint while holding Codex's writer lock.
-        materialize(vault, chosen, snap)
+        materialize(vault, chosen, snap, catalog().get(tid, {}).get("cwd"))
         state_path = STATE / ("state-" + cfg["device"] + ".json")
         state = read_json(state_path, {})
         state[tid] = {"manifest": chosen, "pending_name": chosen.get("name")}

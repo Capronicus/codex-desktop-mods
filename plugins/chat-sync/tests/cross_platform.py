@@ -24,8 +24,7 @@ def start(app):
 
 
 def history(app, tid):
-    # Working folders are local to each computer.
-    app.call("thread/resume", {"threadId": tid, "cwd": str(ROOT)})
+    app.call("thread/resume", {"threadId": tid})
     return str(app.call("thread/turns/list", {"threadId": tid, "itemsView": "full"})["data"])
 
 
@@ -84,6 +83,10 @@ def exercise(stage, vault, incoming, home):
                 pass
             result = sync(call)
             assert result["exported"] == 1 and result["imported"] == 1
+            if result["pending_names"]:
+                # The receiving app can finish indexing a new rollout after the first pass.
+                app.call("thread/list", {"modelProviders": []})
+                assert sync(call)["pending_names"] == 0, "Windows could not apply the imported title"
             tid = find_chat(app, NAME)
             assert FIRST in history(app, tid)
             app.turn(tid, SECOND)

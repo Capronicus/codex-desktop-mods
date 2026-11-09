@@ -8,7 +8,7 @@ for h in (a, b):
     (h / "thread-writer-locks").mkdir(parents=True)
     (h / "thread-writer-locks/.coordination.lock").touch()
     db = sqlite3.connect(h / "state_5.sqlite")
-    db.execute("create table threads(id,rollout_path,archived,name,source)")
+    db.execute("create table threads(id,rollout_path,archived,name,source,cwd)")
     db.close()
 v.mkdir()
 engine = Path(__file__).resolve().parents[1] / "sync.py"
