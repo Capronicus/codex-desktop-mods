@@ -17,7 +17,15 @@ The first sync takes the union of eligible local Codex chats. It includes chat m
 
 If one history continues the other, the receiver checks the complete snapshot and updates its local copy after Codex releases the thread. The plugin recognises the settings record Codex adds just by reopening a chat. If both desktops add independent turns, status reports a conflict with the two device IDs. To reunite the original chat, ask the desktop whose copy you want to replace to adopt the other device’s version. It saves its current conversation as a separate branch first. On the next sync both desktops get the same original chat and the preserved branch. Repeat on any additional desktop that made independent edits. You can also copy a version to a branch without replacing the original. The CLI equivalents are `adopt THREAD_ID DEVICE_ID` and `keep-branch THREAD_ID DEVICE_ID`.
 
-Project and section organization, working directories, credentials, external attachments, repository files and regular cloud ChatGPT conversations are outside this plugin’s scope. When a saved working directory is unavailable on the receiving computer, the chat opens in a dedicated local folder. Select your local project checkout before asking Codex to edit its files. Sync preserves the original workspace metadata in the shared history.
+Working directories, credentials, external attachments, repository files and regular cloud ChatGPT conversations are outside this plugin’s scope. When a saved working directory is unavailable on the receiving computer, the chat opens in a dedicated local folder. Select your local project checkout before asking Codex to edit its files. Sync preserves the original workspace metadata in the shared history.
+
+## Sync projects and custom sections
+
+After configuring the private chat folder, ask **Enable sidebar sync** on each desktop, then **Sync my chats now**. From the CLI use `python3 sync.py sidebar on` or `sidebar off`. This setting starts off and is independent of colour sync.
+
+The next pass exchanges local Codex project and custom section names, including empty groups. A synced chat can belong to both a project and a section. Subsequent renames, chat moves and removals from a group also travel. Independent groups with identical names keep their own identities. Local group deletion stays local. Pins, display order, cloud-only ChatGPT items and project files stay on their respective desktops.
+
+An imported project starts with no folder attached. Select its local checkout on each computer when needed. If an open sidebar has cached the old layout, fully quit and reopen the desktop app. A chat that arrives before its complete history is available gets its assignments on a subsequent pass.
 
 ## Sync sidebar colours
 

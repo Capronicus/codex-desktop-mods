@@ -4,8 +4,9 @@ import json
 import os
 import shutil
 import sqlite3
-from contextlib import closing
+from contextlib import closing, contextmanager
 import subprocess
+import threading
 from pathlib import Path
 
 
@@ -56,60 +57,65 @@ def codex_executable():
     return next((p for p in candidates if p and Path(p).is_file()), None)
 
 
-def apply_through_api(names, home):
+@contextmanager
+def native_api(home):
+    """Open a bounded, metadata-only connection to the receiving Codex profile."""
     exe = codex_executable()
     if not exe:
-        return []
-
-    def message(i, method, params):
-        return json.dumps({"id": i, "method": method, "params": params}) + "\n"
-
-    # A separate local API process is short-lived. These RPCs neither start a
-    # model turn nor load a thread's tools. Only acknowledge successful replies.
+        raise ValueError("The desktop Codex executable is unavailable.")
     proc = subprocess.Popen(
-        [exe, "app-server", "--listen", "stdio://"],
-        stdin=-1,
-        stdout=-1,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        encoding="utf-8",
+        [exe, "app-server", "--listen", "stdio://"], stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
         env={**os.environ, "CODEX_HOME": str(home)},
     )
-    import threading
+    seq = 0
 
-    deadline = threading.Timer(30, proc.kill)
-    deadline.start()
+    def call(method, params):
+        nonlocal seq
+        seq += 1
+        deadline = threading.Timer(15, proc.kill)
+        deadline.start()
+        try:
+            proc.stdin.write(json.dumps({"id": seq, "method": method, "params": params}) + "\n")
+            proc.stdin.flush()
+            for line in proc.stdout:
+                reply = json.loads(line)
+                if reply.get("id") == seq:
+                    if "error" in reply:
+                        raise ValueError(f"{method}: {reply['error'].get('message', 'request failed')}")
+                    return reply["result"]
+            raise EOFError(f"Codex stopped during {method}")
+        finally:
+            deadline.cancel()
 
-    def call(i, method, params):
-        proc.stdin.write(message(i, method, params))
-        proc.stdin.flush()
-        for line in proc.stdout:
-            reply = json.loads(line)
-            if reply.get("id") == i:
-                return "result" in reply
-        raise EOFError()
-
-    done = []
     try:
-        if not call(1, "initialize", {"clientInfo": {"name": "chat_sync", "version": "0.2.0"}}):
-            return done
-        for i, (tid, name) in enumerate(names.items(), 2):
-            if call(i * 2, "thread/read", {"threadId": tid}) and call(
-                i * 2 + 1, "thread/name/set", {"threadId": tid, "name": name}
-            ):
-                done.append(tid)
-    except (OSError, EOFError, ValueError):
-        pass
+        call("initialize", {"clientInfo": {"name": "chat_sync", "version": "0.3.0"},
+                            "capabilities": {"experimentalApi": True}})
+        yield call
     finally:
-        deadline.cancel()
-        proc.stdin.close()
-        proc.stdout.close()
         proc.terminate()
         try:
             proc.wait(3)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+        proc.stdin.close()
+        proc.stdout.close()
+
+
+def apply_through_api(names, home):
+    done = []
+    try:
+        with native_api(home) as call:
+            for tid, name in names.items():
+                try:
+                    call("thread/read", {"threadId": tid})
+                    call("thread/name/set", {"threadId": tid, "name": name})
+                    done.append(tid)
+                except ValueError:
+                    continue
+    except (OSError, EOFError, ValueError):
+        pass
     return done
 
 

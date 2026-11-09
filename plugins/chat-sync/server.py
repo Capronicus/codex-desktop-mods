@@ -33,6 +33,8 @@ TOOLS = [
         "Use an existing private synced folder selected by the user. Enabling automatic mode exchanges transcripts while this plugin runs.",
         {"folder": {"type": "string"}, "automatic": {"type": "boolean"}},
     ),
+    tool("set_sidebar_sync", "Enable or disable exchanging local project and custom section names and chat membership through the configured private folder.",
+         {"enabled": {"type": "boolean"}}),
     tool("set_colour_sync", "Enable or disable exchanging sidebar colours and saved swatches in the configured private folder.",
          {"enabled": {"type": "boolean"}}),
     tool(
@@ -57,7 +59,8 @@ ACTIONS = {
     "chat_sync_status": sync.status,
     "configure_chat_sync": sync.setup,
     "sync_chats": sync.run,
-    "set_colour_sync": sync.set_colours,
+    "set_colour_sync": lambda enabled: sync.set_exchange_option("colours", enabled),
+    "set_sidebar_sync": lambda enabled: sync.set_exchange_option("sidebar", enabled),
     "keep_conflict_branch": lambda thread, device: sync.keep_branch(thread, device),
     "adopt_chat_history": lambda thread, device: sync.adopt_history(thread, device),
     "disable_chat_sync": sync.disable,
@@ -86,7 +89,7 @@ def handle(req):
         version = params.get("protocolVersion")
         return {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[0],
-            "serverInfo": {"name": "chat-sync", "version": "0.2.0"},
+            "serverInfo": {"name": "chat-sync", "version": "0.3.0"},
             "capabilities": {"tools": {}},
         }
     if method == "ping":

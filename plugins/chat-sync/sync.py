@@ -112,6 +112,7 @@ def setup(folder, automatic=False):
             "device": old.get("device") or str(uuid.uuid4()),
             "automatic": automatic,
             "colours": bool(old.get("colours")),
+            "sidebar": bool(old.get("sidebar")),
         }
         vault.mkdir(mode=0o700, exist_ok=True)
         atomic(CONFIG, encode(cfg))
@@ -126,16 +127,19 @@ def status():
         "device": cfg and cfg["device"],
         "automatic": bool(cfg and cfg["automatic"]),
         "colours": bool(cfg and cfg.get("colours")),
+        "sidebar": bool(cfg and cfg.get("sidebar")),
         "last_run": read_json(STATE / "last.json"),
     }
 
 
-def set_colours(enabled):
+def set_exchange_option(option, enabled):
+    if option not in ("colours", "sidebar") or type(enabled) is not bool:
+        raise ValueError("Unknown sync option")
     with lock(STATE / "sync.lock"):
         cfg = read_json(CONFIG)
         if not cfg:
             raise ValueError("Choose a private chat sync folder first.")
-        cfg["colours"] = enabled
+        cfg[option] = enabled
         atomic(CONFIG, encode(cfg))
     return status()
 
@@ -642,6 +646,13 @@ def run(automatic=False):
             for tid, row in index.items()
             if row["source"] in ("cli", "vscode", "appServer", "app_server")
         )
+        if cfg.get("sidebar"):
+            import sidebar
+            try:
+                # Only exchange membership for the local human chats this engine handles.
+                stats["sidebar"] = sidebar.exchange(HOME, vault, device, set(state) & set(streams()), atomic, encode)
+            except (OSError, EOFError, ValueError, sqlite3.Error, subprocess.SubprocessError) as exc:
+                stats["sidebar"] = {"error": str(exc)}
         if cfg.get("colours"):
             import colours
             try:

@@ -55,7 +55,20 @@ def sync(call):
     result = call("sync_chats")
     print("Sync", result, flush=True)
     assert not result["conflicts"] and not result["skipped"], result
+    assert "error" not in result.get("sidebar", {}), result
     return result
+
+
+def group(app, method, name):
+    rows = [r for r in app.call(method, {})["data"] if r["name"] == name]
+    assert len(rows) == 1, rows
+    return rows[0]
+
+
+def placement(app, tid, project, section):
+    thread = app.call("thread/read", {"threadId":tid})["thread"]
+    assert thread["projectId"] == project, (thread["projectId"], project)
+    assert (thread["section"] or {}).get("id") == section, (thread["section"], section)
 
 
 def exercise(stage, vault, incoming, home):
@@ -70,6 +83,13 @@ def exercise(stage, vault, incoming, home):
         assert (home / "chat-sync/config.json").is_file()
         assert call("chat_sync_status")["colours"] is False
         assert call("set_colour_sync", enabled=True)["colours"] is True
+        assert call("chat_sync_status")["sidebar"] is False
+        if stage == "seed":
+            # A normal sync must leave sidebar exchange off on an existing setup.
+            start(app)
+            sync(call)
+            assert not (vault / "codex-chat-sync-v1/sidebar-v1").exists()
+        assert call("set_sidebar_sync", enabled=True)["sidebar"] is True
         if stage == "seed":
             tid = start(app)
             desktop_colours("seed", tid)
@@ -79,9 +99,17 @@ def exercise(stage, vault, incoming, home):
             }))
             app.turn(tid, FIRST)
             app.call("thread/name/set", {"threadId": tid, "name": NAME})
+            project = app.call("project/create", {"name":"Sync project", "roots":[{"path":str(ROOT)}],
+                "metadata":{"private-sentinel":"LOCAL PROJECT METADATA"}, "idempotencyKey":"seed-project"})["project"]
+            section = app.call("threadSection/create", {"name":"Sync section"})["section"]
+            app.call("thread/metadata/update", {"threadId":tid, "projectId":project["id"]})
+            app.call("thread/section/move", {"threadId":tid, "sectionId":section["id"]})
+            app.call("threadSection/create", {"name":"Empty section"})
             assert sync(call)["exported"] == 1
             head = next((vault / "codex-chat-sync-v1/colours-v1").glob("*.json"))
             assert "THIS-MUST-STAY-LOCAL" not in head.read_text()
+            shared = next((vault / "codex-chat-sync-v1/sidebar-v1").glob("*.json")).read_text()
+            assert str(ROOT) not in shared and "LOCAL PROJECT METADATA" not in shared
             return
         if stage == "reply":
             other = start(app)
@@ -102,6 +130,17 @@ def exercise(stage, vault, incoming, home):
                 assert sync(call)["pending_names"] == 0, "Windows could not apply the imported title"
             tid = find_chat(app, NAME)
             assert FIRST in history(app, tid)
+            project = group(app, "project/list", "Sync project")
+            assert project["roots"] == []
+            section = group(app, "threadSection/list", "Sync section")
+            placement(app, tid, project["id"], section["id"])
+            same_name = app.call("project/create", {"name":"Sync project", "roots":[],
+                                 "idempotencyKey":"another-project"})["project"]
+            app.call("project/update", {"projectId":project["id"], "name":"Renamed project"})
+            app.call("threadSection/update", {"sectionId":section["id"], "name":"Renamed section"})
+            app.call("thread/metadata/update", {"threadId":other, "projectId":same_name["id"]})
+            app.call("thread/section/move", {"threadId":tid, "sectionId":None})
+            app.call("thread/section/move", {"threadId":other, "sectionId":section["id"]})
             desktop_colours("reply", tid)
             app.turn(tid, SECOND)
             assert sync(call)["exported"] >= 1
@@ -118,6 +157,15 @@ def exercise(stage, vault, incoming, home):
         call = plugin(app)
         assert sync(call)["updated"] == 1
         assert find_chat(app, NAME) == tid
+        project = group(app, "project/list", "Renamed project")
+        section = group(app, "threadSection/list", "Renamed section")
+        other_project = group(app, "project/list", "Sync project")
+        group(app, "threadSection/list", "Empty section")
+        placement(app, tid, project["id"], None)
+        placement(app, find_chat(app, WINDOWS_CHAT), other_project["id"], section["id"])
+        noop = sync(call)["sidebar"]
+        assert not any(noop[k] for k in ("created", "renamed", "assignments_updated", "pending_chats")), noop
+        assert call("set_sidebar_sync", enabled=False)["sidebar"] is False
         desktop_colours("verify", tid)
         turns = history(app, tid)
         assert FIRST in turns and SECOND in turns and "Birch metadata verified." in turns

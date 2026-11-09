@@ -24,6 +24,8 @@ Refresh **Capronicus Desktop Mods** in Plugin Explorer on each desktop and insta
 
 With Desktop Mods 0.6.0 and Chat Sync 0.2.0 installed on each computer, ask **Enable colour sync** in the configured Chat Sync plugin. This also exchanges saved swatches and group override settings.
 
+Chat Sync 0.3.0 also offers **Enable sidebar sync**. Enable it on each participating desktop to exchange local project and custom section names and the project and section of each synced Codex chat. Choose a project folder separately on each computer.
+
 Read the [setup and conflict recovery guide](plugins/chat-sync/README.md).
 
 ## Windows

@@ -17,6 +17,7 @@ def main():
     sub.add_parser("sync")
     sub.add_parser("disable")
     sub.add_parser("watch")
+    sub.add_parser("sidebar").add_argument("mode", choices=("on", "off"))
     sub.add_parser("colours").add_argument("mode", choices=("on", "off"))
     for action in ("keep-branch", "adopt"):
         copy = sub.add_parser(action)
@@ -26,8 +27,8 @@ def main():
     try:
         if args.command == "setup":
             result = sync.setup(args.folder, args.automatic)
-        elif args.command == "colours":
-            result = sync.set_colours(args.mode == "on")
+        elif args.command in ("sidebar", "colours"):
+            result = sync.set_exchange_option(args.command, args.mode == "on")
         elif args.command == "watch":
             while sync.read_json(sync.CONFIG):
                 try:
