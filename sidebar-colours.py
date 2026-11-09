@@ -28,7 +28,7 @@ ASSET = 'app-primary-f921a74f3eba.js'
 ORIGINAL_HASH = '43c553113064956188f435bd0ce433aa46dad054aeb8e9919c2495b0482182a0'
 MOD_FILES = ('sidebar-colours.py', 'sidebar-colours.js', 'chat-details-main.cjs',
              'chat-details-preload.cjs', 'chat-details.js', 'chat-details-cloud.js',
-             'renderer_updates.py', 'renderer-modules.json')
+             'renderer_updates.py', 'renderer-modules.json', 'chat-layout.js')
 TRANSCRIPT = 'virtualized-turn-list-849fe48ea6b5.js'
 CLOUD_TRANSCRIPT = 'chatgpt-conversation-turn-content-48014b7b6a96.js'
 
@@ -108,6 +108,24 @@ def modify(js):
     return '\n'.join([bindings, (SOURCE / 'sidebar-colours.js').read_text(), init, js])
 
 
+def legacy_chat_layout(js):
+    js = subst(js, '(0,TL.useEffect)(CL,c),null}function CL()', '(0,TL.useEffect)(CL,c),cscLayoutElement(TL)}function CL()')
+    adapter = """
+      import {Ckt as initLocal, jkt as initCloud, Qkt as initSprite, qkt as initAssets,
+        Hkt as initAvatars, xkt as localPet, Ekt as cloudPet, Zkt as petSprite,
+        Kkt as petAssets, Bkt as avatarOptions, Vkt as spriteSource} from './app-initial-fdea07eb2719.js';
+      function cscUseNativePet() {
+        initLocal(); initCloud(); initSprite(); initAssets(); initAvatars();
+        const open=V(oE), choice=ME(), id=choice.selectedAvatarId ?? choice.selectedAvatar.id;
+        const local=W(localPet,id).data, cloud=W(cloudPet,id).pet;
+        const avatar=avatarOptions(local && [local],cloud && [cloud]).find(pet=>pet.id===id);
+        return {overlayOpen:open,avatar,source:avatar && spriteSource(avatar),sprite:petSprite,assets:petAssets,
+          summon:()=>_e.dispatchMessage("avatar-overlay-open",{})};
+      }
+    """
+    return js + '\n' + adapter + (SOURCE/'chat-layout.js').read_text()
+
+
 def signature():
     values = []
     for source in (ARCHIVE, SYSTEM / 'ChatGPT', SYSTEM / 'resources/linux-package-metadata.json'):
@@ -133,6 +151,7 @@ def patch_archive(destination):
         additions = []
         legacy = [
             (ASSET, assets, ORIGINAL_HASH, None),
+            ('app-runtime-5d97b89a192d.js', assets, 'f0ffe0fab823edda8f832b1e56118119a01b5d1cfb269ef27f87837fdbf2849f', None),
             (TRANSCRIPT, assets, 'c3d825dfdf4b36bd83dd56a7948ef4f0807f325b0de60763acca9af8eafe4426', 'chat-details.js'),
             (CLOUD_TRANSCRIPT, assets, 'fbe067e82f77aa9026e2badb1992111faebda490bbe4beb867096b0370ca5fee', 'chat-details-cloud.js'),
             ('early-bootstrap.js', desktop, '466efbe496786705721ae93dd7cd2be7c08d0f760d53adf984dfde77af93fecf', 'chat-details-main.cjs'),
@@ -148,6 +167,8 @@ def patch_archive(destination):
                 js = original.decode()
                 if name == ASSET:
                     js = modify(js)
+                elif name == 'app-runtime-5d97b89a192d.js':
+                    js = legacy_chat_layout(js)
                 elif name == TRANSCRIPT:
                     js = subst(js, '"data-turn-key":p,children:x', '"data-turn-key":p,children:withChatDetails(i,x,L,ke)')
                 elif name == CLOUD_TRANSCRIPT:
@@ -183,7 +204,11 @@ def patch_archive(destination):
                 if not all(a in data for a in anchors):
                     raise ValueError('Unrecognised desktop entry point '+name)
                 yield entry, data + b'\n' + (SOURCE/extension).read_bytes()
-            yield from renderer_patches(assets['async']['files'], read, SOURCE)
+            pet_assets = {match[1]: '/assets/' + name for name in assets
+                          if (match := re.fullmatch(r'([a-z-]+)-spritesheet-v\d+\.[0-9a-f]+\.webp', name))}
+            if 'codex' not in pet_assets:
+                raise ValueError('Missing built-in pet artwork')
+            yield from renderer_patches(assets['async']['files'], read, SOURCE, pet_assets)
 
         patches = legacy_patches() if ASSET in assets else updated_patches()
         for entry, patched in patches:

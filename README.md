@@ -1,8 +1,8 @@
 # Codex Desktop Mods
 
-Two unofficial mods for the Linux ChatGPT desktop app. One colours the project and chat titles in the sidebar. The other adds timestamps and token counts to conversations.
+Unofficial mods for the Linux ChatGPT desktop app. They colour sidebar titles, add timestamps and token counts, and give wide chats more room with a dock for your selected pet.
 
-Tested with Linux desktop builds `26.1027.51404`, `26.1029.61003`, `26.1103.31037` and `26.1103.32239` installed at `/usr/lib/chatgpt`. Both mods install together.
+Tested with Linux desktop builds `26.1027.51404`, `26.1029.61003`, `26.1103.31037`, `26.1103.32239` and `26.1103.60933` installed at `/usr/lib/chatgpt`. The mods install together.
 
 ## Sidebar colours
 
@@ -22,6 +22,12 @@ The mod reads usage from the existing local Codex session history. Its desktop b
 
 ![A test chat showing two reply timestamps and the running token total](images/chat-details.png)
 
+## Wider chats and the pet dock
+
+On wide windows the messages and composer expand together, leaving the Sources and Outputs card clear. Your selected pet sits in the right margin and runs in place as you scroll. Scrolling down makes it run right, scrolling up makes it run left, and it settles when scrolling stops. The dock gives way when the window gets narrow.
+
+Click the pet to open its floating window, or summon it with the usual desktop pet command. Closing that window returns it to the chat. The dock uses the desktop’s selected artwork and respects reduced motion.
+
 ## Install
 
 Use Python 3 on Linux. Allow approximately 1 GB of free space for the cached app copy. Download and extract the repository, then run this from the extracted folder as your normal user.
@@ -30,7 +36,7 @@ Use Python 3 on Linux. Allow approximately 1 GB of free space for the cached app
 python3 sidebar-colours.py install
 ```
 
-Fully quit ChatGPT, then reopen **ChatGPT** from your applications menu. The launcher runs the patched copy under your user cache. Your colours stay in the desktop profile. To upgrade from v0.1.0, run the same install command from the new download once.
+Fully quit ChatGPT, then reopen **ChatGPT** from your applications menu. The launcher runs the patched copy under your user cache. Your colours stay in the desktop profile. To upgrade from an earlier release, run the same install command from the new download once.
 
 ## Desktop updates
 
@@ -63,4 +69,4 @@ node tests/chat-details.cjs
 python3 tests/updates.py
 ```
 
-With the Linux desktop app and Google Chrome installed, run `node tests/sidebar-colours.cjs` to check the rendered colours in both themes.
+With the Linux desktop app and Google Chrome installed, run `node tests/sidebar-colours.cjs` to check the rendered colours in both themes and `node tests/chat-layout.cjs` to check chat width, panel clearance and scroll behaviour.

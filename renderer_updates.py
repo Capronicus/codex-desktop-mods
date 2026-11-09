@@ -12,7 +12,7 @@ def replace(source, pattern, replacement, count=1):
     return result
 
 
-def adapt(role, source, files):
+def adapt(role, source, files, pet_assets):
     if role == 'dependency':
         return source
     header, body = source.split('{', 1)
@@ -31,7 +31,27 @@ def adapt(role, source, files):
           {factory}
         """ + body
     extra = ''
-    if role == 'row':
+    if role == 'pet-api':
+        hooks = re.search(re.escape(require) + r'\("(y5DF|zTeN)"\)', body)[1]
+        sprite = 'DRpS' if hooks == 'y5DF' else 'FPUb'
+        exports = header[:-1].split(',')[1]
+        extra = files('chat-layout.js') + f"""
+          {require}.d({exports},{{cscLayout:()=>cscLayoutElement}});
+          const cscPetAssets={json.dumps(pet_assets)};
+          function cscUseNativePet() {{
+            const hooks={require}("{hooks}"), avatars={require}("SqlE");
+            const open=hooks.Ul({require}("QLtS").k);
+            const selection={require}("dYlv").WU();
+            const id=selection.selectedAvatarId ?? selection.selectedAvatar.id;
+            const local=hooks._U({require}("l2C7").Zn,id).data;
+            const cloud=hooks._U({require}("KPGh").lc,id).pet;
+            const avatar=avatars.i0(local && [local],cloud && [cloud]).find(pet=>pet.id===id);
+            return {{overlayOpen:open,avatar,source:avatar && avatars.aN(avatar),
+              assets:cscPetAssets,sprite:{require}("{sprite}").bH,
+              summon:()=>{require}("TL6G").O1.dispatchMessage("avatar-overlay-open",{{}})}};
+          }}
+        """
+    elif role == 'row':
         # These selectors are exported by separately fingerprinted modules.
         hook_alias = re.search(r'\(0,(\w+)\.Ul\)', body)[1]
         hooks = re.search(r'\b' + hook_alias + r'=\w+\("([^"]+)"\)', body)[1]
@@ -119,7 +139,7 @@ def adapt(role, source, files):
     return header + '{\n' + extra + '\n' + body
 
 
-def renderer_patches(directory, read, source):
+def renderer_patches(directory, read, source, pet_assets):
     catalog = json.loads((source/'renderer-modules.json').read_text())
     starts = defaultdict(list)
     for sha, info in catalog.items():
@@ -127,11 +147,24 @@ def renderer_patches(directory, read, source):
     # Search actual factories. The bundler is free to rename or regroup chunks.
     pattern = re.compile(rb'(?<=[{,])(?:' + b'|'.join(re.escape(s) for s in starts) + rb')')
     found = set()
+    # Validate just the native overlay listener. Changes elsewhere in the app
+    # shell do not affect this integration. Its pet API is fingerprinted above.
+    host_hook = re.compile(
+        rb'\{selectedAvatar:\w+\}=\(0,(?P<pet>\w+)\.WU\)\(\);return '
+        rb'(?:(?!\}function ).){1,1800}?"avatar-overlay-open-state-changed"'
+        rb'[^}]{1,250}?\(0,(?P<react>\w+)\.useEffect\)\((?P<request>\w+),\w+\),'
+        rb'(?P<slot>null)\}function (?P=request)\(\)\{\w+\.O1\.dispatchMessage\("avatar-overlay-open-state-request"')
+    host_count = 0
     for name, entry in directory.items():
         if not name.endswith('.js') or entry.get('unpacked'):
             continue
         original = read(entry)
         edits = []
+        if b'avatar-overlay-open-state-request' in original:
+            for host in host_hook.finditer(original):
+                start, end = host.span('slot')
+                edits.append((start, end, host['pet'] + b'.cscLayout(' + host['react'] + b')'))
+                host_count += 1
         for match in pattern.finditer(original):
             for sha, info in starts[match[0]]:
                 end = match.start() + info['size']
@@ -139,15 +172,17 @@ def renderer_patches(directory, read, source):
                 if hashlib.sha256(factory).hexdigest() == sha:
                     found.add((info['role'], info['id'] if info['role']=='dependency' else ''))
                     if info['role'] != 'dependency':
-                        code = adapt(info['role'], factory.decode(), lambda s: (source/s).read_text())
+                        code = adapt(info['role'], factory.decode(), lambda s: (source/s).read_text(), pet_assets)
                         edits.append((match.start(),end,code.encode()))
                     break
             else:
                 raise ValueError('Unrecognised desktop renderer module '+match[0].decode().split('(')[0])
         if edits:
-            for start,end,code in reversed(edits):
+            for start,end,code in sorted(edits, reverse=True):
                 original = original[:start]+code+original[end:]
             yield entry,original
+    if host_count != 1:
+        raise ValueError('Unrecognised desktop pet window listener')
     required = {(i['role'], i['id'] if i['role']=='dependency' else '') for i in catalog.values()}
     if required != found:
         raise ValueError('Missing desktop renderer modules: '+', '.join(id or role for role,id in sorted(required-found)))
