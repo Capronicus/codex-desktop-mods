@@ -2,7 +2,7 @@
 
 Unofficial mods for the Windows and Linux ChatGPT desktop apps with Codex. They colour sidebar titles, add timestamps and token counts, and give wide chats more room with a dock for your selected pet.
 
-Windows support targets desktop version `26.1103.32239` (Store package `OpenAI.Codex 26.1103.4239.0`, x64). Tested with Linux desktop builds `26.1027.51404`, `26.1029.61003`, `26.1103.31037`, `26.1103.32239` and `26.1103.60933` installed at `/usr/lib/chatgpt`. The mods install together.
+Windows support targets desktop version `26.1103.32239` (Store package `OpenAI.Codex 26.1103.4239.0`, x64). Tested with Linux desktop builds `26.1027.51404`, `26.1029.61003`, `26.1103.31037`, `26.1103.32239` and `26.1103.60933` installed at `/usr/lib/chatgpt`. The visual mods install together. For chat history across computers, install **Codex Chat Sync** separately from the same marketplace.
 
 ## Install from Plugin Explorer
 
@@ -17,6 +17,12 @@ For the command-line marketplace workflow, run:
 codex plugin marketplace add Capronicus/codex-desktop-mods
 codex plugin add codex-desktop-mods@capronicus-desktop-mods
 ```
+
+## Sync chats between desktops
+
+Refresh **Capronicus Desktop Mods** in Plugin Explorer on each desktop and install **Codex Chat Sync**. Open a new chat and ask **Check chat sync status**. To connect a device, choose the local path to the same private, available-offline folder in Nextcloud, OneDrive or Google Drive. Each computer can use a different path. Installation starts disconnected.
+
+Read the [setup and conflict recovery guide](plugins/chat-sync/README.md).
 
 ## Windows
 

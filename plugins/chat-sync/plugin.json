@@ -1,0 +1,28 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "chat-sync",
+  "version": "0.1.1",
+  "description": "Sync local Codex chat histories across desktop profiles.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Codex Chat Sync",
+        "shortDescription": "Sync local desktop chats",
+        "longDescription": "Exchange Codex conversations through a private synced folder and preserve divergent histories.",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": "Check chat sync status.",
+        "developerName": "Capronicus"
+      },
+      "requires_local_executor": true,
+      "onboardingSkill": "./skills/sync-chats/SKILL.md"
+    }
+  },
+  "author": {
+    "name": "Capronicus"
+  },
+  "repository": "https://github.com/Capronicus/codex-desktop-mods"
+}

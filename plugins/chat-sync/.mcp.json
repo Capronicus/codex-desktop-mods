@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "chat-sync": {
+      "command": "python3",
+      "args": [
+        "-B",
+        "${PLUGIN_ROOT}/server.py"
+      ],
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  }
+}
