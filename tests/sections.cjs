@@ -56,8 +56,11 @@ async function run() {
     await page.getByRole('button',{name:'Save swatch'}).click();
     await page.getByRole('button',{name:'Cancel'}).click();
     await groupPicker();
-    await page.getByRole('checkbox',{name:'Override all chat colours'}).uncheck();
-    assert.deepEqual(await colours(), [violet,project,chat,violet,project,chat,native]);
+    const toggle=page.getByRole('checkbox',{name:'Override all chat colours'});
+    assert.ok((await toggle.boundingBox()).width >= 22);
+    await toggle.uncheck();
+    await page.waitForFunction(()=>!document.querySelector('.csc-override input')?.disabled);
+    assert.deepEqual(await colours(), [violet,violet,violet,violet,violet,violet,native]);
     await page.getByRole('button',{name:'Use #9a77d3'}).click();
     await groupPicker();
     await page.getByRole('button',{name:'Remove…'}).click();
@@ -69,11 +72,11 @@ async function run() {
       n.querySelector('button span').textContent = 'Renamed section';
       n.querySelectorAll('[data-csc-chat-key]').forEach(row => row.remove());
     });
-    assert.deepEqual(await colours(), [violet, project, chat, native]);
+    assert.deepEqual(await colours(), [violet,violet,violet,native]);
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('csc-open-section-colour',{detail:'section1'})));
     await page.locator('dialog[open]').getByText('Renamed section', {exact:true}).waitFor();
     await page.getByRole('button',{name:'Use default colour'}).click();
-    assert.deepEqual(await colours(), [native,project,chat,native]);
+    assert.deepEqual(await colours(), [violet,violet,violet,native]);
     console.log('PASS section picker, inheritance order, Recents, rename, collapse and reset.');
   } finally {
     await browser.close();

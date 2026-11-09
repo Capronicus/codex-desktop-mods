@@ -25,7 +25,8 @@ def adapt(role, source, files, pet_assets):
           function cscGet() {{
             return cscInstance ??= createSidebarColours({{
               preferencesReady:t.Uz, getPreference:t.TB, setPreference:t.jx,
-              preferenceKeys:t.b9, watchPreferencePrefix:t.Gk
+              preferenceKeys:t.b9, watchPreferencePrefix:t.Gk,
+              readProjectPage:args=>{require}("YCbu").Pb(args)
             }});
           }}
           {factory}

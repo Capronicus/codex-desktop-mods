@@ -31,7 +31,7 @@ def set_name(name):
     return {"device_name": name}
 
 
-def exchange(vault, cfg, heads, accepted, busy, stats, state, private, visible):
+def exchange(vault, cfg, heads, accepted, busy, stats, state, private, visible, origins):
     directory = vault / "receipts-v1"
     dev = cfg["device"]
     path = directory / (dev + ".json")
@@ -46,7 +46,14 @@ def exchange(vault, cfg, heads, accepted, busy, stats, state, private, visible):
             ack[tid] = revisions
         elif tid in busy and revisions:
             waiting[tid] = revisions
-    save(path, {"v": 1, "name": label(cfg), "received": ack, "busy": waiting})
+    own = {
+        "v": 1,
+        "name": label(cfg),
+        "received": ack,
+        "busy": waiting,
+        "origins": {tid: basis for tid, basis in origins.items() if tid not in private},
+    }
+    save(path, own)
     peers = {}
     for f in directory.glob("*.json"):
         if f == path or not sync.UUID.fullmatch(f.stem):
@@ -62,6 +69,15 @@ def exchange(vault, cfg, heads, accepted, busy, stats, state, private, visible):
                 peers[f.stem] = d
         except (ValueError, OSError):
             continue
+    claims = {}
+    for device, doc in {**peers, dev: own}.items():
+        observed = doc.get("origins", {})
+        if isinstance(observed, dict):
+            for tid, basis in observed.items():
+                if isinstance(basis, str) and basis in ("started", "first_seen", "preexisting"):
+                    claims.setdefault(tid, []).append(
+                        {"device": device, "name": doc["name"][:60], "basis": basis}
+                    )
     result = {}
     for tid in visible | busy | set(stats["conflicts"]):
         if tid in private:
@@ -86,7 +102,18 @@ def exchange(vault, cfg, heads, accepted, busy, stats, state, private, visible):
                     items.append({"device": device, "name": peer["name"][:60]})
         if status == "saved" and delivered:
             status = "received"
-        result[tid] = {"status": status, "received_by": delivered, "waiting_on": blocked}
+        candidates = claims.get(tid, [])
+        origin = (
+            candidates[0]
+            if len(candidates) == 1 and candidates[0]["basis"] != "preexisting"
+            else None
+        )
+        result[tid] = {
+            "status": status,
+            "received_by": delivered,
+            "waiting_on": blocked,
+            "origin": origin,
+        }
     for tid in private:
         result[tid] = {"status": "local_only", "received_by": [], "waiting_on": []}
     save(sync.STATE / "delivery.json", {"device": dev, "chats": result})

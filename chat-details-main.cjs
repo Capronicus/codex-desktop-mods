@@ -175,15 +175,75 @@
     return value === null || (key.startsWith('override-') ? value === 'on' :
       typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value));
   }
+  // Find members even when a project is collapsed or the chat is outside the visible page.
+  ipcMain.handle('local-sidebar-colours:members', async (event,kind,id) => {
+    const frame=event.senderFrame;
+    if (!frame || frame!==event.sender.mainFrame || !/^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(frame.url) ||
+        !['project','section'].includes(kind) || typeof id!=='string' || !/^[a-z0-9:@._-]{1,256}$/i.test(id))
+      throw Error('Invalid colour group');
+    let state={};
+    try {state=JSON.parse(await fs.readFile(path.join(home,'.codex-global-state.json'),'utf8'));}
+    catch(error){if(error.code!=='ENOENT')throw error;}
+    const chats=new Set(), cloudProjects=new Set(), projects=new Set(), sections=new Set();
+    function addItem(key){
+      if (typeof key!=='string') return;
+      if (key.startsWith('codex:project:')||key.startsWith('chatgpt:project:')) projects.add(key.slice(key.indexOf(':project:')+9));
+      else if (key.startsWith('codex:thread:')) chats.add(key.slice(13));
+      else if (key.startsWith('chatgpt:conversation:')) chats.add(key);
+    }
+    if (kind==='project') projects.add(id);
+    else {
+      for(const account of Object.values(state['electron-persisted-atom-state']?.['sidebar-custom-sections-v3'] || {}))
+        for(const sec of account?.sections || []) if(sec.id===id){
+          if(sec.hostSectionIds?.local)sections.add(sec.hostSectionIds.local);
+          for(const key of sec.itemKeys || [])addItem(key);
+        }
+    }
+    const aliases=state['app-server-project-id-by-legacy-project-id-by-host']?.['local:'+home] || {};
+    for(const [key,record] of Object.entries(state['local-projects'] || {})){
+      const cloud=record.chatGptBacking?.projectId;
+      if(projects.has(key) || projects.has(aliases[key]) || (cloud && projects.has(cloud))){
+        projects.add(key);if(aliases[key])projects.add(aliases[key]);if(cloud)projects.add(cloud);
+      }
+    }
+    for(const project of projects)if(project.startsWith('g-p-'))cloudProjects.add(project);
+    for(const [tid,record] of Object.entries(state['thread-project-assignments'] || {}))
+      if(idPattern.test(tid) && projects.has(record?.projectId))chats.add('local:'+tid);
+    let db;
+    try{
+      const {DatabaseSync}=require('node:sqlite');
+      const catalog=path.join(home,'state_5.sqlite');
+      if(await fs.stat(catalog).then(v=>v.isFile(),e=>{if(e.code==='ENOENT')return false;throw e;})){
+        db=new DatabaseSync(catalog,{readOnly:true});
+        const cols=new Set(db.prepare('PRAGMA table_info(threads)').all().map(r=>r.name));
+        const local=state['thread-project-assignments'] || {};
+        if (cols.has('project_id')) for(const pid of projects) for(const {id:tid} of db.prepare('SELECT id FROM threads WHERE project_id=?').all(pid))
+          if(idPattern.test(tid) && (!local[tid] || projects.has(local[tid].projectId)))chats.add('local:'+tid);
+        if (cols.has('thread_section_id')) for(const sid of sections) for(const {id:tid} of db.prepare('SELECT id FROM threads WHERE thread_section_id=?').all(sid))
+          if(idPattern.test(tid))chats.add('local:'+tid);
+      }
+    } finally{db?.close();}
+    return {chats:[...chats],cloudProjects:[...cloudProjects]};
+  });
+
   ipcMain.handle('local-sidebar-colours:preferences', (event, mode, entries, previous) => {
     const frame = event.senderFrame;
     if (!frame || frame !== event.sender.mainFrame || !/^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(frame.url) ||
-        !['read','seed','write'].includes(mode) || !Array.isArray(entries) || entries.length > 512 ||
+        !['read','seed','write','finish'].includes(mode) || !Array.isArray(entries) || entries.length > (mode==='finish' ? 250000 : 512) ||
         (mode === 'read' && entries.length) || !entries.every(validEdit)) throw new Error('Invalid colour preference request');
     const db = colourDB();
     if (entries.length) {
       db.exec('BEGIN IMMEDIATE');
       try {
+        if(mode==='finish'){
+          const force=entries.find(([k,v])=>k.startsWith('override-') && v===null)?.[0];
+          const group=force?.slice(9);
+          const get=db.prepare('SELECT value FROM colours WHERE key=?');
+          if(!group || get.get(force)?.value!=='on')throw Error('Group override changed while saving');
+          const colour=get.get(group)?.value;
+          if (!entries.every(([k,v])=>(k.startsWith('chat/') && v===colour) || (k===force && v===null) || (k===group && v===null)))
+            throw Error('Group colour changed while saving');
+        }
         const author = db.prepare('SELECT author FROM identity WHERE id=1').get().author;
         const rev = mode === 'seed' ? 0 : db.prepare('SELECT COALESCE(MAX(rev),0)+1 AS next FROM colours').get().next;
         const upsert = db.prepare(mode === 'seed' ? 'INSERT OR IGNORE INTO colours VALUES (?,?,?,?)' :

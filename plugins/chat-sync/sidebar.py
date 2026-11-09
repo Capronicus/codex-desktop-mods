@@ -191,6 +191,7 @@ def exchange(
         and (section_access or not key.startswith("section/"))
     )
     hidden.difference_update(current)
+    new_orders = {k for k in current if k.startswith("order/") and k not in last and k not in rows}
     clock = 1 + max((r[0] for r in rows.values()), default=0)
     for key, value in current.items():
         old = last.get(key, MISSING)
@@ -221,7 +222,10 @@ def exchange(
                 ):
                     raise ValueError("Invalid shared sidebar records")
                 for key, record in links.rows(head["rows"], portable=False).items():
-                    if permitted(key, record) and (key not in rows or record[:2] > rows[key][:2]):
+                    first_remote = key in new_orders and path.stem != device
+                    if permitted(key, record) and (first_remote or key not in rows or record[:2] > rows[key][:2]):
+                        if first_remote:
+                            new_orders.discard(key)
                         rows[key] = filtered_order(key, record)
             except (AttributeError, KeyError, OSError, TypeError, ValueError):
                 deferred.append(path.stem)

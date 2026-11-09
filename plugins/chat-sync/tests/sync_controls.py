@@ -4,6 +4,7 @@ from contextlib import contextmanager, closing
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -91,7 +92,7 @@ def create(app, name, root):
 
 def run():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-        base = Path(tmp)
+        base = Path(tmp).resolve()
         src, dst = [base / n / ".codex" for n in ("source", "receiver")]
         vault = base / "vault"
         vault.mkdir()
@@ -113,6 +114,8 @@ def run():
             for home in (src, dst):
                 prepare(home, port)
             with profile(src):
+                sync.setup(str(vault))
+                delivery.set_name("Home")
                 with closing(App(src)) as app:
                     p = create(app, "Linked", a)
                     q = create(app, "Private work", a)
@@ -147,6 +150,26 @@ def run():
                 sync.set_exchange_option("order", True)
                 assert not projects.set_private("project", q, True)["previously_shared"]
                 assert not projects.set_private("chat", individual, True)["previously_shared"]
+                # Upgrade an existing installation with Electron colours and no SQLite seed.
+                state = sync.read_json(src / ".codex-global-state.json")
+                prefix = "codex.sidebar-colours.v1/"
+                expected = {
+                    "project/" + p: "#bb2100",
+                    "section/" + section: "#9922bb",
+                    "chat/local:" + tid: "#44ccdd",
+                    "swatch/12ab34": "#12ab34",
+                    "override-project/" + p: "on",
+                }
+                private_colour = {"project/" + q: "#123456", "chat/local:" + secret: "#998877"}
+                state["electron-persisted-atom-state"].update(
+                    {prefix + k: v for k, v in (expected | private_colour).items()}
+                )
+                state["project-order"] = [extra, p, q]
+                sync.atomic(src / ".codex-global-state.json", sync.encode(state))
+                sync.set_exchange_option("colours", True)
+                sent = sync.sync_colours_now()
+                assert sent["active"] == len(expected) and sent["saved_swatches"] == 1, sent
+                assert {d.name for d in (vault / "codex-chat-sync-v1").iterdir()} == {"colours-v1"}
                 stats = sync.run()
                 assert stats["exported"] == 1 and "error" not in stats["sidebar"], stats
                 assert delivery.status(tid)["status"] == "saved"
@@ -167,7 +190,24 @@ def run():
                 delivery.set_name("Windows QA")
                 assert p in projects.inventory()["shared"]
                 projects.link(local, p, str(b))
+                sync.set_exchange_option("colours", True)
+                synced = sync.sync_colours_now()
+                assert synced["active"] == len(expected) and synced["saved_swatches"] == 1, synced
+                with closing(sqlite3.connect(dst / "sidebar-colours.sqlite")) as db:
+                    imported = dict(db.execute("SELECT key,value FROM colours"))
+                    for key, value in expected.items():
+                        assert imported[key.replace("/" + p, "/" + local)] == value, (key, imported)
+                    db.execute(
+                        "UPDATE colours SET value=NULL,rev=10 WHERE key IN (?,?)",
+                        ("swatch/12ab34", "project/" + local),
+                    )
+                    db.commit()
+                sync.sync_colours_now()
                 stats = sync.run()
+                assert (
+                    delivery.status(tid)["origin"]["name"] == "Home"
+                    and delivery.status(tid)["origin"]["basis"] == "started"
+                ), delivery.status(tid)
                 assert stats["imported"] == 1 and stats["sidebar"].get("preview_required"), stats
                 pre = batches.review()
                 assert (
@@ -186,15 +226,13 @@ def run():
                 ] == [str(b)], layout.projects
                 assert layout.observed({tid})["chat-project/" + tid] == local
                 assert tid in layout.data["pinned-thread-ids"]
-                assert (
-                    local in layout.data["project-order"] and extra in layout.data["project-order"]
-                )
+                assert layout.data["project-order"] == [extra, local]
                 assert layout.sections[0]["itemKeys"] == [desktop_layout.ITEM + tid]
                 with sync.open_rollout(sync.streams()[tid][0]) as f:
                     assert json.loads(f.readline())["payload"]["cwd"] == str(b)
                 with closing(App(dst)) as app:
-                    resumed=app.call("thread/resume",{"threadId":tid})["thread"]
-                    assert Path(resumed["cwd"]).resolve()==b.resolve(),resumed["cwd"]
+                    resumed = app.call("thread/resume", {"threadId": tid})["thread"]
+                    assert Path(resumed["cwd"]).resolve() == b.resolve(), resumed["cwd"]
                 result = batches.undo()
                 assert result["sidebar"] is False
                 restored = desktop_layout.Layout(dst)
@@ -205,6 +243,12 @@ def run():
                 )
                 assert tid in sync.streams()
             with profile(src):
+                sync.sync_colours_now()
+                with closing(sqlite3.connect(src / "sidebar-colours.sqlite")) as db:
+                    imported = dict(db.execute("SELECT key,value FROM colours"))
+                    assert imported["swatch/12ab34"] is None and imported["project/" + p] is None, (
+                        imported
+                    )
                 sync.run()
                 assert [p["name"] for p in delivery.status(tid)["received_by"]] == ["Windows QA"]
                 with closing(App(src)) as app:

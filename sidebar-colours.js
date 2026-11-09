@@ -1,6 +1,6 @@
 // Loaded alongside the desktop sidebar renderer. Each key is one local preference,
 // so edits to different items in separate windows cannot overwrite each other.
-function createSidebarColours({preferencesReady, getPreference, setPreference, preferenceKeys, watchPreferencePrefix}) {
+function createSidebarColours({preferencesReady, getPreference, setPreference, preferenceKeys, watchPreferencePrefix, readProjectPage}) {
   installForkLines();
   installDeliveryStatus();
   const prefix = 'codex.sidebar-colours.v1/';
@@ -43,14 +43,14 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
   }
   const nativeReady = preferencesReady();
   const ready = bridge ? nativeReady.then(seed).catch(() => {}) : nativeReady;
-  async function write(entries) {
+  async function write(entries, mode = 'write') {
     if (bridge) {
       // Retry migration after a transient database lock before accepting new edits.
       if (version === null) await seed();
       const supported = entries.filter(([id]) => portableKey.test(id));
-      if (supported.length) await exchange('write', supported);
+      if (supported.length) await exchange(mode, supported);
     }
-    for (const [id,value] of entries) setPreference(prefix + id, value ?? undefined);
+    for (const [id,value] of entries) if(!bridge || mode!=='finish' || !id.startsWith('chat/')) setPreference(prefix + id, value ?? undefined);
     refresh();
   }
   function poll() {
@@ -91,7 +91,13 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     .csc-brightness input::-webkit-slider-thumb { appearance:none; width:16px; height:16px; margin-top:-4px;
       border-radius:50%; background:var(--csc-selected); border:2px solid white; box-shadow:0 0 0 1px #222; }
     .csc-footer, .csc-saved-heading { display:flex; align-items:center; justify-content:space-between; }
-    .csc-override { display:flex; gap:6px; align-items:center; }
+    .csc-override { display:flex; gap:10px; align-items:center; min-height:38px; cursor:pointer; font-weight:600; }
+    .csc-override input[type="checkbox"] { appearance:none; box-sizing:border-box; display:grid; place-content:center; flex:none;
+      width:22px; height:22px; margin:0; border:2px solid currentColor; border-radius:5px; background:Canvas; color:CanvasText; cursor:pointer; }
+    .csc-override input:checked { background:Highlight; border-color:Highlight; color:HighlightText; }
+    .csc-override input:checked::before { content:""; width:7px; height:12px; border:solid currentColor; border-width:0 2.5px 2.5px 0; transform:translateY(-1px) rotate(45deg); }
+    .csc-override input:focus-visible { outline:2px solid currentColor; outline-offset:3px; }
+    .csc-override input:disabled { opacity:.65; }
     .csc-custom { flex-wrap:wrap; }
     .csc-action { background: transparent; border-radius: 7px; padding: 5px 8px; color: inherit; font: inherit; }
     .csc-action:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
@@ -304,6 +310,39 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     section.append(wheel, brightness, row);
     return section;
   }
+  async function groupChats(kind,id){
+    const keys=new Set(), projects=new Set();
+    function add(raw){
+      if (typeof raw!=='string')return;
+      if (/^(?:codex|chatgpt):project:/.test(raw)) projects.add(raw.replace(/^[^:]+:project:/,''));
+      else keys.add(sectionChatKey(raw));
+    }
+    if(kind==='section'){
+      for(const key of sections().find(s=>s.id===id)?.itemKeys || [])add(key);
+    } else projects.add(id);
+    const native=await window.localChatDetails?.colourMembers?.(kind,id);
+    for(const chat of native?.chats || [])add(chat);
+    for(const pid of native?.cloudProjects || [])projects.add(pid);
+    for(const hint of inheritedLinks)if(hint[kind]===id)add(hint.chat);
+    for(const row of document.querySelectorAll('['+threadAttr+']')){
+      const project=row.getAttribute(ownerAttr)||row.closest('['+projectListAttr+']')?.getAttribute(projectListAttr)||row.closest('[data-csc-project-group]')?.getAttribute('data-csc-project-group');
+      if((kind==='section' && memberSection(row)===id) || projects.has(project))add(row.getAttribute(threadAttr));
+    }
+    for(const projectId of projects){
+      if(!projectId.startsWith('g-p-'))continue;
+      if(!readProjectPage)throw Error('This build cannot list the full cloud project.');
+      let cursor=null;const seen=new Set();
+      do {
+        if(seen.has(cursor))throw Error('Repeated project page');
+        seen.add(cursor);
+        const page=await readProjectPage({projectId,cursor,ownedOnly:false,limit:50,signal:AbortSignal.timeout(20000)});
+        if(!Array.isArray(page?.items))throw Error('Incomplete project membership');
+        for(const c of page.items)if(c.id)add('chatgpt:conversation:'+c.id);
+        cursor=page.cursor;
+      }while(cursor);
+    }
+    return [...keys].filter(k=>typeof k==='string' && /^[A-Za-z0-9:_@.-]{1,256}$/.test(k));
+  }
   async function open(kind, id) {
     if (!id) return;
     await ready;
@@ -335,12 +374,27 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     error.setAttribute('role', 'alert');
     const setting = kind + '/' + savedId();
     const force = 'override-' + setting;
-    async function change(entries) {
-      try { await write(entries); return true; }
+    async function change(entries,mode) {
+      try { await write(entries,mode); return true; }
       catch { error.textContent = 'Could not save the colour in this profile.'; return false; }
+    }
+    async function finishOverride(reset=false) {
+      const base=read(kind,id);
+      if(!hex.test(base))return change([[force,null],...(reset?[[setting,null]]:[])]);
+      try {
+        const members=await groupChats(kind,id);
+        return await change([...members.map(chat=>['chat/'+chat,base]),[force,null],...(reset?[[setting,null]]:[])],'finish');
+      }catch{
+        error.textContent='Could not load all chats in this group. The override is still on.';
+        return false;
+      }
     }
     async function save(value) {
       if (value !== null && !hex.test(value)) return;
+      if(value===null && (project || section) && read('override-'+kind,id)==='on'){
+        if(await finishOverride(true))box.close();
+        return;
+      }
       const entries = [[setting,value]];
       if (value === null && (project || section)) entries.push([force,null]);
       if (await change(entries)) box.close();
@@ -352,10 +406,12 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
       toggle.checked = read('override-' + kind,id) === 'on';
       toggle.onchange = async () => {
         toggle.disabled = true;
-        if (!await change([[force,toggle.checked ? 'on' : null]])) toggle.checked = !toggle.checked;
+        const ok=toggle.checked ? await change([[force,'on']]) : await finishOverride();
+        if (!ok) toggle.checked = !toggle.checked;
         toggle.disabled = false;
       };
-      label.append(toggle, document.createTextNode(' Override all chat colours'));
+      label.title='Turning this off saves the current group colour on each chat.';
+      label.append(toggle, document.createTextNode('Override all chat colours'));
       box.append(label);
     }
     const grid = el('div', 'csc-grid');
@@ -576,7 +632,8 @@ function installDeliveryStatus() {
           const r=records[id];
           if(!r){if(row.hasAttribute('data-csc-delivery')){row.removeAttribute('data-csc-delivery');label.removeAttribute('data-sync-mark');if(label.title===label.dataset.syncTitle)label.removeAttribute('title');delete label.dataset.syncTitle;}continue;}
           const received=(r.received_by||[]).map(p=>p.name), waiting=(r.waiting_on||[]).map(p=>p.name);
-          const message=[names[r.status] || ('Last synced version received by '+received.join(', ')), ...(waiting.length?['Waiting for '+waiting.join(', ')+' to close the chat']:[])].join(' · ');
+          const origin=r.origin ? (r.origin.basis==='started'?'Started on ':'First seen on ')+r.origin.name : null;
+          const message=[...(origin?[origin]:[]),names[r.status] || ('Last synced version received by '+received.join(', ')), ...(waiting.length?['Waiting for '+waiting.join(', ')+' to close the chat']:[])].join(' · ');
           row.dataset.cscDelivery=waiting.length?'busy':r.status;
           label.dataset.syncMark=({received:'✓',busy:'◷',conflict:'!',local_only:'⌂'})[row.dataset.cscDelivery]||'·';
           label.title=message;label.dataset.syncTitle=message;

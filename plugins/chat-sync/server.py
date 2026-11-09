@@ -30,29 +30,78 @@ def tool(name, description, fields=None, readonly=False):
 
 
 TOOLS = [
-    tool("list_sync_projects","List local project IDs, checkout folders, shared projects and explicit links.",readonly=True),
-    tool("link_sync_project","Link one existing local project to a shared project by ID and select its checkout on this computer.",
-         {key:{"type":"string"} for key in ("local_project","shared_project","folder")}),
-    tool("chat_delivery_status","Check the last synced chat revision and the desktops that acknowledged it.",{"thread":{"type":"string"}},readonly=True),
-    tool("name_sync_device","Choose this computer's display name for receipts.",{"name":{"type":"string"}}),
-    tool("set_local_only","Exclude or include a local chat or project in future sync on this device. Reports previous sharing.",
-         {"kind":{"type":"string","enum":["chat","project"]},"ident":{"type":"string"},"enabled":{"type":"boolean"}}),
-    tool("preview_sidebar_sync","Preview received sidebar changes without applying them.",readonly=True),
-    tool("apply_sidebar_preview","Apply the reviewed batch using its exact preview ID.",{"batch":{"type":"string"}}),
-    tool("undo_sidebar_sync","Undo the most recent received sidebar batch locally and pause sidebar sync."),
-    tool("set_pin_order_sync","Opt in or out of local chat pins and sidebar ordering on this device.",{"enabled":{"type":"boolean"}}),
+    tool(
+        "list_sync_projects",
+        "List local project IDs, checkout folders, shared projects and explicit links.",
+        readonly=True,
+    ),
+    tool(
+        "link_sync_project",
+        "Link one existing local project to a shared project by ID and select its checkout on this computer.",
+        {key: {"type": "string"} for key in ("local_project", "shared_project", "folder")},
+    ),
+    tool(
+        "chat_delivery_status",
+        "Check the last synced chat revision and the desktops that acknowledged it.",
+        {"thread": {"type": "string"}},
+        readonly=True,
+    ),
+    tool(
+        "name_sync_device",
+        "Choose this computer's display name for receipts.",
+        {"name": {"type": "string"}},
+    ),
+    tool(
+        "set_local_only",
+        "Exclude or include a local chat or project in future sync on this device. Reports previous sharing.",
+        {
+            "kind": {"type": "string", "enum": ["chat", "project"]},
+            "ident": {"type": "string"},
+            "enabled": {"type": "boolean"},
+        },
+    ),
+    tool(
+        "preview_sidebar_sync",
+        "Preview received sidebar changes without applying them.",
+        readonly=True,
+    ),
+    tool(
+        "apply_sidebar_preview",
+        "Apply the reviewed batch using its exact preview ID.",
+        {"batch": {"type": "string"}},
+    ),
+    tool(
+        "undo_sidebar_sync",
+        "Undo the most recent received sidebar batch locally and pause sidebar sync.",
+    ),
+    tool(
+        "set_pin_order_sync",
+        "Opt in or out of local chat pins and sidebar ordering on this device.",
+        {"enabled": {"type": "boolean"}},
+    ),
     tool("chat_sync_status", "Show local configuration and the last sync result.", readonly=True),
     tool(
         "configure_chat_sync",
         "Use an existing private synced folder selected by the user. Enabling automatic mode exchanges transcripts while this plugin runs.",
         {"folder": {"type": "string"}, "automatic": {"type": "boolean"}},
     ),
-    tool("set_sidebar_sync", "Enable or disable exchanging local project and custom section names and chat membership through the configured private folder.",
-         {"enabled": {"type": "boolean"}}),
-    tool("set_colour_sync", "Enable or disable exchanging sidebar colours and saved swatches in the configured private folder.",
-         {"enabled": {"type": "boolean"}}),
     tool(
-        "sync_chats", "Exchange completed local Codex conversations with the configured private folder."
+        "set_sidebar_sync",
+        "Enable or disable exchanging local project and custom section names and chat membership through the configured private folder.",
+        {"enabled": {"type": "boolean"}},
+    ),
+    tool(
+        "sync_colours_now",
+        "Exchange only sidebar colours, saved swatches and colour memberships with the configured folder.",
+    ),
+    tool(
+        "set_colour_sync",
+        "Enable or disable exchanging sidebar colours and saved swatches in the configured private folder.",
+        {"enabled": {"type": "boolean"}},
+    ),
+    tool(
+        "sync_chats",
+        "Exchange completed local Codex conversations with the configured private folder.",
     ),
     tool(
         "keep_conflict_branch",
@@ -70,14 +119,19 @@ TOOLS = [
     ),
 ]
 ACTIONS = {
-    "list_sync_projects":projects.inventory, "link_sync_project":projects.link,
-    "chat_delivery_status":delivery.status,"name_sync_device":delivery.set_name,
-    "set_local_only":projects.set_private,"preview_sidebar_sync":batches.review,
-    "apply_sidebar_preview": lambda batch:batches.review("apply",batch),
-    "undo_sidebar_sync":batches.undo,"set_pin_order_sync":lambda enabled:sync.set_exchange_option("order",enabled),
+    "list_sync_projects": projects.inventory,
+    "link_sync_project": projects.link,
+    "chat_delivery_status": delivery.status,
+    "name_sync_device": delivery.set_name,
+    "set_local_only": projects.set_private,
+    "preview_sidebar_sync": batches.review,
+    "apply_sidebar_preview": lambda batch: batches.review("apply", batch),
+    "undo_sidebar_sync": batches.undo,
+    "set_pin_order_sync": lambda enabled: sync.set_exchange_option("order", enabled),
     "chat_sync_status": sync.status,
     "configure_chat_sync": sync.setup,
     "sync_chats": sync.run,
+    "sync_colours_now": sync.sync_colours_now,
     "set_colour_sync": lambda enabled: sync.set_exchange_option("colours", enabled),
     "set_sidebar_sync": lambda enabled: sync.set_exchange_option("sidebar", enabled),
     "keep_conflict_branch": lambda thread, device: sync.keep_branch(thread, device),
@@ -124,14 +178,22 @@ def handle(req):
         not isinstance(args, dict)
         or args.keys() != fields.keys()
         or any(
-            not isinstance(args[k], bool if f["type"] == "boolean" else str) for k, f in fields.items()
+            not isinstance(args[k], bool if f["type"] == "boolean" else str)
+            for k, f in fields.items()
         )
     ):
         raise ValueError("Invalid tool arguments")
     try:
         result = ACTIONS[name](**args)
         return {"content": [{"type": "text", "text": json.dumps(result)}]}
-    except (OSError, ValueError, sync.Busy, sqlite3.Error, EOFError, subprocess.SubprocessError) as exc:
+    except (
+        OSError,
+        ValueError,
+        sync.Busy,
+        sqlite3.Error,
+        EOFError,
+        subprocess.SubprocessError,
+    ) as exc:
         return {
             "isError": True,
             "content": [{"type": "text", "text": str(exc) or "Busy; retry shortly."}],
@@ -153,7 +215,11 @@ if __name__ == "__main__":
                 reply = {"error": {"code": -32602, "message": str(exc)}}
             print(
                 json.dumps(
-                    {"jsonrpc": "2.0", "id": req.get("id") if isinstance(req, dict) else None, **reply}
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req.get("id") if isinstance(req, dict) else None,
+                        **reply,
+                    }
                 ),
                 flush=True,
             )

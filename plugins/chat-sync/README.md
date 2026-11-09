@@ -33,7 +33,7 @@ On the desktop that already has a checkout, ask **“Link my local TARTARUS to t
 
 ## Delivery and sharing
 
-- Ask **“Name this sync device Windows PC”** on the receiver. On the sender, ask **“Has Windows PC received this chat?”** A receipt refers to the last completed chat revision that the receiving plugin verified. The next local sync reads receipts delivered by your folder provider. A new reply needs a new receipt.
+- Ask **“Name this sync device Windows PC”** on the receiver. On the sender, ask **“Has Windows PC received this chat?”** A receipt refers to the last completed chat revision that the receiving plugin verified. The next local sync reads receipts delivered by your folder provider. A new reply needs a new receipt. Name your devices **Home** and **Work** to see **Started on Home** or **Started on Work** on new chats. For older chats the plugin can report the first desktop that observed an existing chat. When its origin is unknown, the origin label stays blank.
 - With **Codex Desktop Mods 0.7.0** applied, hover over a local sidebar chat title for its delivery status. A check mark means a peer acknowledged the last synced revision. A clock or exclamation mark flags a busy chat or a conflict.
 - Ask **“Keep this chat on this device”** or **“Keep the CAPRICA project local only.”** The rule covers future transfers on this device and reports whether data was already saved to the shared folder. Earlier copies remain on peers and in the vault. You can enable sharing again later.
 
@@ -47,9 +47,9 @@ The equivalent commands in the plugin directory are `python3 sync.py projects`, 
 
 ## Sync sidebar colours
 
-Apply **Codex Desktop Mods 0.6.0** or later on each computer and open it once to import existing colours. After configuring the private sync folder, ask **Enable colour sync** on each device, then **Sync my chats now**. The CLI setting is `python3 sync.py colours on` or `colours off`. Colour sharing starts off on existing and new installations.
+Apply **Codex Desktop Mods 0.7.0** and install **Chat Sync 0.4.0** or later on each computer. After configuring the same private folder, ask **Enable colour sync and sync my colours now** on each device. This exchanges colour preferences immediately, including existing saved swatches. From the CLI, use `python3 sync.py colours on` and `python3 sync.py sync-colours`. Use `colours off` to disable it. Colour sharing starts off on existing and new installations.
 
-The same sync pass carries individual, project and section colours, saved swatches, group overrides and resets. Matching IDs share settings. A chat can inherit its original project or section colour through its ID even when it appears only in Recents on the other desktop. Independently created groups with the same name keep separate IDs. The receiving mod refreshes within five seconds while visible. Concurrent edits to different swatches or chats coexist. Simultaneous edits to the same setting use a revision and device ID to select a consistent value.
+The same sync pass carries individual, project and section colours, saved swatches, group overrides and resets. Matching IDs and explicitly linked local projects share settings across desktops. A chat can inherit its original project or section colour through its ID even when it appears only in Recents on the other desktop. Independently created groups with the same name keep separate IDs. The receiving mod refreshes within five seconds while visible. Concurrent edits to different swatches or chats coexist. Simultaneous edits to the same setting use a revision and device ID to select a consistent value.
 
 ## Storage and verification
 

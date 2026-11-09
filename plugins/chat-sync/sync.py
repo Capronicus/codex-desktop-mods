@@ -109,6 +109,7 @@ def setup(folder, automatic=False):
             raise ValueError("Disable this location before selecting a different folder.")
         cfg = {
             **old,
+            "origin_since":old.get("origin_since",time.time()),
             "folder": str(base),
             "device": old.get("device") or str(uuid.uuid4()),
             "automatic": automatic,
@@ -156,6 +157,21 @@ def set_exchange_option(option, enabled):
         cfg[option] = enabled
         atomic(CONFIG, encode(cfg))
     return status()
+
+
+def sync_colours_now():
+    import colours
+    import projects
+
+    with lock(STATE / "sync.lock"):
+        cfg, vault = projects.config()
+        if not cfg.get("colours"):
+            raise ValueError("Enable colour sync on this desktop first.")
+        if not vault.is_dir():
+            raise ValueError("Sync folder unavailable. Check the mount or desktop sync client.")
+        index = catalog() if (HOME / "state_5.sqlite").is_file() else {}
+        sharing = projects.Sharing(cfg, vault, index, HOME)
+        return colours.exchange(HOME, vault, cfg["device"], index, atomic, encode, sharing)
 
 
 def disable():
@@ -305,7 +321,11 @@ def snapshot(vault, tid, entry, name, known):
         "name": name,
         "archived": archived,
     }
-    return {"token": token, "manifest": manifest}
+    try:
+        created_at=datetime.fromisoformat(str(info.get("timestamp") or meta.get("timestamp")).replace("Z","+00:00")).timestamp()
+    except (ValueError,OSError,OverflowError):
+        created_at=0
+    return {"token": token, "manifest": manifest,"created_at":created_at}
 
 
 def valid_manifest(man, tid):
@@ -569,6 +589,13 @@ def run(automatic=False):
         projects.publish_links(cfg,vault)
         sharing=projects.Sharing(cfg,vault,index,HOME)
         private=sharing.private_chats
+        if "origin_since" not in cfg:
+            cfg["origin_since"]=time.time()
+            atomic(CONFIG,encode(cfg))
+        origin_path=STATE/("origins-"+device+".json")
+        origins=read_json(origin_path,{})
+        original_count=len(origins)
+        previously_seen={p.stem for p in (vault/"heads").glob("*/*.json") if p.parent.name!=device}
         accepted=set()
         busy=set()
         checkouts=read_json(STATE/("checkouts-"+device+".json"),{})
@@ -599,6 +626,13 @@ def run(automatic=False):
             try:
                 snap = snapshot(vault, tid, entry, name, prev)
                 if snap:
+                    if not prev and tid not in origins:
+                        if tid in previously_seen:
+                            origins[tid]="preexisting"
+                        elif snap.get("created_at",0)>=cfg["origin_since"]:
+                            origins[tid]="started"
+                        else:
+                            origins[tid]="first_seen"
                     previous = prev.get("manifest", {})
                     clock = previous.get("name_clock", [0, ""])
                     if name and name != previous.get("name"):
@@ -617,6 +651,8 @@ def run(automatic=False):
                 stats["busy"] += 1
             except (OSError, ValueError, EOFError, subprocess.SubprocessError, sqlite3.Error) as exc:
                 stats["skipped"][tid] = str(exc)
+        if len(origins) != original_count:
+            atomic(origin_path,encode(origins))
         heads = shared_heads(vault, stats["skipped"])
         for tid, copies in heads.items():
             if tid in private:
@@ -689,7 +725,7 @@ def run(automatic=False):
             for tid, row in index.items()
             if row["source"] in ("cli", "vscode", "appServer", "app_server")
         )
-        delivery.exchange(vault,cfg,heads,accepted,busy,stats,state,private,set(snapshots)|imported_ids)
+        delivery.exchange(vault,cfg,heads,accepted,busy,stats,state,private,set(snapshots)|imported_ids,origins)
         if cfg.get("sidebar"):
             import sidebar
             try:
