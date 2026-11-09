@@ -1,0 +1,33 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "codex-desktop-mods",
+  "version": "0.5.0",
+  "description": "Manage the Codex Desktop Mods patch for the Windows and Linux ChatGPT desktop apps.",
+  "author": {
+    "name": "Capronicus"
+  },
+  "repository": "https://github.com/Capronicus/codex-desktop-mods",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Codex Desktop Mods",
+        "shortDescription": "Windows and Linux desktop mods",
+        "longDescription": "Manage sidebar colours for sections, projects and chats, branch connectors, wider chats, the pet dock, message timestamps and token usage on the Windows and Linux desktop apps.",
+        "developerName": "Capronicus",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "logo": "./images/icon.png",
+        "composerIcon": "./images/icon.png",
+        "defaultPrompt": [
+          "Check my desktop mods.",
+          "Apply the desktop mods.",
+          "Remove the desktop mods."
+        ]
+      },
+      "onboardingSkill": "./skills/manage-desktop-mods/SKILL.md"
+    }
+  }
+}

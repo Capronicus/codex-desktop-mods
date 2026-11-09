@@ -2,7 +2,6 @@
 """Install, launch or remove the local Codex sidebar colour mod for Linux."""
 import argparse
 from contextlib import contextmanager
-import fcntl
 import hashlib
 import json
 import os
@@ -40,6 +39,9 @@ def subst(source, old, new, count=1):
 
 
 def modify(js):
+    from renderer_updates import section_colour_action
+    section_marker = '{id:`section-chat-actions-separator`,type:`separator`}'
+    js = subst(js, section_marker, section_colour_action('d') + section_marker)
     # The renderer's own selector resolves the membership of a keyed thread, even
     # when it appears in Recents/Pinned and its project hasn't been expanded.
     js = subst(js, 'nt=$e===`sidebar`||tt||et,rt=Ke()',
@@ -74,8 +76,10 @@ def modify(js):
         ('hostId:n.hostId,id:r,kind:`local`,pinned:o,selected:s,title:n.label', 'n.createdAt'),
     ]:
         attributes = 'Zw.sidebarThreadRow({active:d,' + fields + '})'
+        fork = (',"data-csc-fork-id":f,"data-csc-fork-host":y,"data-csc-fork-parent":p?.forkedFromId??Ie?.forkedFromId'
+                if 'title:void 0' in fields else '')
         js = subst(js, 'dataAttributes:' + attributes,
-                   'dataAttributes:{...' + attributes + ',"data-csc-updated":' + timestamp + '}')
+                   'dataAttributes:{...' + attributes + ',"data-csc-updated":' + timestamp + fork + '}')
     # ChatGPT conversations use a different row adapter. Use its server ID and
     # project ID both inside the project and when the same row appears in Recents.
     js = subst(js, '(aY,{ref:R,floatStatusIconsEnd:!0,revealActionsOnStatusHover:',
@@ -105,7 +109,7 @@ def modify(js):
       const sidebarColours = createSidebarColours({
         preferencesReady, getPreference, setPreference, preferenceKeys, watchPreferencePrefix
       });"""
-    return '\n'.join([bindings, (SOURCE / 'sidebar-colours.js').read_text(), init, js])
+    return '\n'.join([bindings, (SOURCE / 'sidebar-colours.js').read_text(encoding='utf-8'), init, js])
 
 
 def legacy_chat_layout(js):
@@ -123,7 +127,7 @@ def legacy_chat_layout(js):
           summon:()=>_e.dispatchMessage("avatar-overlay-open",{})};
       }
     """
-    return js + '\n' + adapter + (SOURCE/'chat-layout.js').read_text()
+    return js + '\n' + adapter + (SOURCE/'chat-layout.js').read_text(encoding='utf-8')
 
 
 def signature():
@@ -138,8 +142,8 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def patch_archive(destination):
-    with ARCHIVE.open('rb') as src:
+def patch_archive(destination, archive=None):
+    with (archive or ARCHIVE).open('rb') as src:
         size, pickle_size, _, json_size = struct.unpack('<IIII', src.read(16))
         if size != 4:
             raise ValueError('Unknown app archive format')
@@ -176,7 +180,7 @@ def patch_archive(destination):
                     js = subst(js, 't[4]!==y||t[5]!==k?(we=e=>(0,$.jsx)(yC,{item:k,index:y,children:e}),t[4]=y',
                                't[496]!==f||t[4]!==y||t[5]!==k?(we=e=>(0,$.jsx)(yC,{item:k,index:y,children:withCloudChatTime(e,k,f)}),t[496]=f,t[4]=y')
                 if extension:
-                    js += '\n' + (SOURCE / extension).read_text()
+                    js += '\n' + (SOURCE / extension).read_text(encoding='utf-8')
                 yield entry, js.encode()
 
         def read(entry):
@@ -238,7 +242,7 @@ def qt_arg(arg):
 
 
 def desktop_text():
-    text = STOCK_DESKTOP.read_text()
+    text = STOCK_DESKTOP.read_text(encoding='utf-8')
     old = 'Exec=chatgpt %U'
     return subst(text, old, f'Exec=/usr/bin/python3 {qt_arg(INSTALL / "sidebar-colours.py")} launch %U\n{MARKER}')
 
@@ -317,7 +321,7 @@ def save_runtime(target, before):
 
 def install():
     desktop = desktop_text()
-    if DESKTOP.exists() and MARKER not in DESKTOP.read_text().splitlines():
+    if DESKTOP.exists() and MARKER not in DESKTOP.read_text(encoding='utf-8').splitlines():
         raise ValueError(f'An existing personal launcher already uses {DESKTOP}. It has been preserved.')
     before = signature()
     target = runtime_for(before)
@@ -343,6 +347,7 @@ def atomic_write(path, content):
 
 @contextmanager
 def locked():
+    import fcntl
     lock_dir = Path(os.environ.get('XDG_RUNTIME_DIR') or '/tmp')
     with (lock_dir / f'codex-sidebar-colours-{os.getuid()}.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -351,7 +356,7 @@ def locked():
 
 def read_state(name):
     try:
-        meta = json.loads((INSTALL / name).read_text())
+        meta = json.loads((INSTALL / name).read_text(encoding='utf-8'))
         return meta if isinstance(meta, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -413,7 +418,7 @@ def launch(args):
 
 
 def uninstall():
-    if DESKTOP.is_file() and MARKER in DESKTOP.read_text().splitlines():
+    if DESKTOP.is_file() and MARKER in DESKTOP.read_text(encoding='utf-8').splitlines():
         DESKTOP.unlink()
     for p in (CACHE, INSTALL):
         if p.is_dir():

@@ -122,6 +122,48 @@
     } finally { await handle.close(); }
   }
 
+  async function readForkParent(id) {
+    const candidate = await findFile(id);
+    if (!candidate) return undefined;
+    const file = await fs.realpath(candidate).catch(() => fs.realpath(candidate + '.zst'));
+    const root = await fs.realpath(home);
+    const dir = path.relative(root,file).split(path.sep)[0];
+    if (!['sessions','archived_sessions'].includes(dir) || !file.replace(/\.zst$/, '').endsWith('-'+id+'.jsonl')) return undefined;
+    const raw = require('node:fs').createReadStream(file);
+    const stream = file.endsWith('.zst') ? require('node:zlib').createZstdDecompress() : raw;
+    if (stream !== raw) { raw.on('error',error => stream.destroy(error)); raw.pipe(stream); }
+    try {
+      const pieces = [];
+      let size = 0;
+      for await (const chunk of stream) {
+        const end = chunk.indexOf(10);
+        const part = end < 0 ? chunk : chunk.subarray(0,end);
+        size += part.length;
+        if (size > maxLine) break;
+        pieces.push(part);
+        if (end >= 0) {
+          const header = JSON.parse(Buffer.concat(pieces).toString('utf8'));
+          if (header.type !== 'session_meta' || header.payload?.id !== id) break;
+          const parent = header.payload.forked_from_id;
+          return idPattern.test(parent) ? parent : null;
+        }
+      }
+    } finally { raw.destroy(); stream.destroy(); }
+    return undefined;
+  }
+
+  ipcMain.handle('local-chat-details:fork-parents', async (event, ids) => {
+    const frame = event.senderFrame;
+    if (!frame || frame !== event.sender.mainFrame || !/^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(frame.url)
+      || !Array.isArray(ids) || ids.length > 128 || !ids.every(id => typeof id==='string' && idPattern.test(id))) return {};
+    const parents = {};
+    for (const id of new Set(ids)) {
+      const parent = await readForkParent(id).catch(() => undefined);
+      if (parent !== undefined) parents[id] = parent;
+    }
+    return parents;
+  });
+
   ipcMain.handle('local-chat-details:read-turns', async (event, id, turns) => {
     const frame=event.senderFrame;
     if (!frame || frame!==event.sender.mainFrame || !/^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(frame.url)

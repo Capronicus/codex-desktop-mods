@@ -88,7 +88,9 @@ def adapt(role, source, files, pet_assets):
             stamp = {'n.label':'n.createdAt', 'n.title':'e.at??n.task?.createdAt',
                      'e.task.title??""':'e.task.updated_at??e.task.created_at',
                      'void 0':'tD?.updatedAtMs??i?.updatedAt??d??e.at'}[title]
-            return 'dataAttributes:{...'+m[1]+',"data-csc-updated":'+stamp+'}'
+            fork = (',"data-csc-fork-id":a,"data-csc-fork-host":h,"data-csc-fork-parent":i?.forkedFromId??tD?.forkedFromId'
+                    if title == 'void 0' else '')
+            return 'dataAttributes:{...'+m[1]+',"data-csc-updated":'+stamp+fork+'}'
         body = replace(body, r'dataAttributes:(\w+\.rW\.sidebarThreadRow\(\{[^{}]*?title:([^{}]+?)\}\))', dated, 4)
     elif role == 'cloudsidebar':
         body = replace(body, r'ref:eh,floatStatusIconsEnd:!0,revealActionsOnStatusHover:',
@@ -139,8 +141,14 @@ def adapt(role, source, files, pet_assets):
     return header + '{\n' + extra + '\n' + body
 
 
+def section_colour_action(section):
+    return ('{id:"section-colour",message:{id:"local.sidebarColours.section",defaultMessage:"Section colour…"},'
+            'onSelect:()=>window.dispatchEvent(new CustomEvent("csc-open-section-colour",{detail:'+section+'.id}))},')
+
+
+
 def renderer_patches(directory, read, source, pet_assets):
-    catalog = json.loads((source/'renderer-modules.json').read_text())
+    catalog = json.loads((source/'renderer-modules.json').read_text(encoding='utf-8'))
     starts = defaultdict(list)
     for sha, info in catalog.items():
         starts[info['start'].encode()].append((sha, info))
@@ -155,6 +163,7 @@ def renderer_patches(directory, read, source, pet_assets):
         rb'[^}]{1,250}?\(0,(?P<react>\w+)\.useEffect\)\((?P<request>\w+),\w+\),'
         rb'(?P<slot>null)\}function (?P=request)\(\)\{\w+\.O1\.dispatchMessage\("avatar-overlay-open-state-request"')
     host_count = 0
+    section_count = 0
     for name, entry in directory.items():
         if not name.endswith('.js') or entry.get('unpacked'):
             continue
@@ -172,15 +181,22 @@ def renderer_patches(directory, read, source, pet_assets):
                 if hashlib.sha256(factory).hexdigest() == sha:
                     found.add((info['role'], info['id'] if info['role']=='dependency' else ''))
                     if info['role'] != 'dependency':
-                        code = adapt(info['role'], factory.decode(), lambda s: (source/s).read_text(), pet_assets)
+                        code = adapt(info['role'], factory.decode(), lambda s: (source/s).read_text(encoding='utf-8'), pet_assets)
                         edits.append((match.start(),end,code.encode()))
                     break
             else:
                 raise ValueError('Unrecognised desktop renderer module '+match[0].decode().split('(')[0])
-        if edits:
-            for start,end,code in sorted(edits, reverse=True):
-                original = original[:start]+code+original[end:]
+        for start,end,code in sorted(edits, reverse=True):
+            original = original[:start]+code+original[end:]
+        section_menu = b'id:"edit-section"' in original
+        if section_menu:
+            menu = rb'(\{id:"edit-section",message:\w+\.edit,icon:[\w.]+,onSelect:\(\)=>[^{}]{1,90}\{section:(\w+)\}\)\},)(?=\{id:"section-chat-actions-separator")'
+            original, hits = re.subn(menu,lambda m:m[1]+section_colour_action(m[2].decode()).encode(),original)
+            section_count += hits
+        if edits or section_menu:
             yield entry,original
+    if section_count != 1:
+        raise ValueError('Unrecognised desktop section menu')
     if host_count != 1:
         raise ValueError('Unrecognised desktop pet window listener')
     required = {(i['role'], i['id'] if i['role']=='dependency' else '') for i in catalog.values()}

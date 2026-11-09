@@ -27,6 +27,12 @@ function cscTrackChat(place, animate) {
   style.textContent = cscLayoutCSS;
   document.head.append(style);
   let scroll, content, pane, card, frame, stopTimer, lastTop, previousPosition;
+  let motion = 'idle';
+  function setMotion(next) {
+    if (motion === next) return;
+    motion = next;
+    animate(next);
+  }
   const resize = new ResizeObserver(schedule);
   function position(value) {
     if (previousPosition?.left === value?.left && previousPosition?.top === value?.top) return;
@@ -36,10 +42,10 @@ function cscTrackChat(place, animate) {
   function onScroll() {
     const top = scroll.scrollTop;
     if (lastTop === top) return;
-    animate(top > lastTop ? 'running-right' : 'running-left');
+    setMotion(top > lastTop ? 'running-right' : 'running-left');
     lastTop = top;
     clearTimeout(stopTimer);
-    stopTimer = setTimeout(() => animate('idle'), 320);
+    stopTimer = setTimeout(() => setMotion('idle'), 320);
   }
   function clearWidth() {
     if (!scroll?.hasAttribute('data-csc-wide-chat')) return;
@@ -59,7 +65,7 @@ function cscTrackChat(place, animate) {
         clearWidth();
         scroll?.removeEventListener('scroll', onScroll);
         clearTimeout(stopTimer);
-        animate('idle');
+        setMotion('idle');
         lastTop = next?.scrollTop;
         next?.addEventListener('scroll', onScroll, {passive: true});
       }

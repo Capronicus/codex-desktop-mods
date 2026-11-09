@@ -1,11 +1,16 @@
 // Loaded alongside the desktop sidebar renderer. Each key is one local preference,
 // so edits to different items in separate windows cannot overwrite each other.
 function createSidebarColours({preferencesReady, getPreference, setPreference, preferenceKeys, watchPreferencePrefix}) {
+  installForkLines();
   const prefix = 'codex.sidebar-colours.v1/';
   const projectAttr = 'data-app-action-sidebar-project-id';
   const projectListAttr = 'data-app-action-sidebar-project-list-id';
   const threadAttr = 'data-csc-chat-key';
   const rawThreadAttr = 'data-app-action-sidebar-thread-id';
+  const sectionAttr = 'data-sidebar-project-container-id';
+  const sectionSelector = '[' + sectionAttr + '^="custom:"]';
+  const sectionToggle = '[data-app-action-sidebar-section-toggle]';
+  const sectionStore = 'sidebar-custom-sections-v3';
   const ownerAttr = 'data-csc-owner';
   const hex = /^#[0-9a-f]{6}$/i;
   let rules, dialog;
@@ -84,8 +89,22 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
       selectors.map(s => s + ' [data-csc-chat-label]').join(',') + '{color:var(--csc-chat-tone,var(--csc-row-base)) !important}';
   }
 
+  function sections() {
+    const settings = getPreference(sectionStore, {}) || {};
+    return Object.values(settings).flatMap(account => Array.isArray(account?.sections) ? account.sections : []);
+  }
+  function sectionChatKey(key) {
+    return typeof key === 'string' ? key.replace(/^codex:thread:/, '') : null;
+  }
+  function memberSection(row) {
+    const group = row?.closest(sectionSelector);
+    if (group) return group.getAttribute(sectionAttr).slice(7);
+    const keys = [row?.getAttribute(rawThreadAttr),row?.getAttribute(threadAttr)].filter(Boolean);
+    return sections().find(section => section.itemKeys?.some(k => keys.includes(sectionChatKey(k))))?.id;
+  }
   function refresh() {
-    const projects = [], chats = [];
+    const sectionRules = [], projects = [], chats = [];
+    const records = sections();
     for (const k of preferenceKeys(prefix)) {
       const value = getPreference(k, null);
       if (!hex.test(value)) continue;
@@ -93,7 +112,16 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
       const split = parts.indexOf('/');
       const kind = parts.slice(0, split), id = parts.slice(split + 1);
       if (!id || split < 0) continue;
-      if (kind === 'project') {
+      if (kind === 'section') {
+        const group = attr(sectionAttr, 'custom:' + id);
+        sectionRules.push(group + ' ' + sectionToggle + '{color:' + value + ' !important}');
+        const members = [group + ' :where([' + threadAttr + '])'];
+        for (const raw of records.find(section => section.id === id)?.itemKeys || []) {
+          const chat = sectionChatKey(raw);
+          if (chat) members.push(attr(rawThreadAttr,chat), attr(threadAttr,chat));
+        }
+        sectionRules.push(chatRules(members,value));
+      } else if (kind === 'project') {
         projects.push(attr(projectAttr, id) + ' [data-csc-project-label]{color:' + value + ' !important}');
         const descendant = ' :where([' + threadAttr + '])';
         projects.push(chatRules([attr(projectListAttr, id) + descendant,
@@ -107,7 +135,7 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
       rules.id = 'codex-sidebar-colour-rules';
       document.head.append(rules);
     }
-    rules.textContent = projects.concat(chats).join('\n');
+    rules.textContent = sectionRules.concat(projects,chats).join('\n');
   }
 
   const palette = [
@@ -219,19 +247,20 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     if (!id) return;
     await ready;
     if (dialog && dialog.open) dialog.close();
-    const project = kind === 'project';
-    const selector = project ? attr(projectAttr, id) : [attr(threadAttr, id), attr(rawThreadAttr, id)].join(',');
+    const project = kind === 'project', section = kind === 'section';
+    const selector = section ? attr(sectionAttr,'custom:'+id) : project ? attr(projectAttr, id) : [attr(threadAttr, id), attr(rawThreadAttr, id)].join(',');
     const row = document.querySelector(selector);
-    const savedId = () => project ? id : row?.getAttribute(threadAttr) || id;
-    const title = row?.getAttribute('data-app-action-sidebar-' + (project ? 'project-label' : 'thread-title'))
+    const savedId = () => section || project ? id : row?.getAttribute(threadAttr) || id;
+    const title = section ? row?.querySelector('[data-app-action-sidebar-section-heading]')?.getAttribute('data-app-action-sidebar-section-heading') : row?.getAttribute('data-app-action-sidebar-' + (project ? 'project-label' : 'thread-title'))
       ?? row?.querySelector('[data-csc-chat-label]')?.textContent;
     const owner = row?.closest('[data-csc-project-group]')?.getAttribute('data-csc-project-group')
       || row?.getAttribute(ownerAttr) || row?.closest('[' + projectListAttr + ']')?.getAttribute(projectListAttr);
     const current = read(kind, savedId());
-    const inherited = project ? null : read('project', owner);
+    const sectionId = kind === 'chat' ? memberSection(row) : null;
+    const inherited = kind === 'chat' ? read('project',owner) || read('section',sectionId) : null;
     const box = el('dialog', 'csc-picker');
     dialog = box;
-    const heading = el('h2', null, project ? 'Project colour' : 'Chat colour');
+    const heading = el('h2', null, section ? 'Section colour' : project ? 'Project colour' : 'Chat colour');
     heading.id = 'csc-picker-heading';
     box.setAttribute('aria-labelledby', heading.id);
     box.append(heading);
@@ -257,7 +286,8 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     }
     const customRow = customPicker(current || inherited || '#299e93', save);
     const footer = el('div', 'csc-footer');
-    footer.append(action(project || !owner ? 'Use default colour' : 'Use project colour', () => save(null)),
+    footer.append(action(kind === 'chat' && owner && (read('project',owner) || !sectionId) ? 'Use project colour' :
+      sectionId ? 'Use section colour' : 'Use default colour', () => save(null)),
       action('Cancel', () => box.close()));
     box.append(grid, customRow, footer, error);
     box.addEventListener('close', () => box.remove(), {once: true});
@@ -274,13 +304,17 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
   }
   // This alternate gesture also works on rows whose regular actions are hidden.
   function targetRow(target) {
-    return target instanceof Element ? target.closest('[' + threadAttr + '],[' + projectAttr + ']') : null;
+    if (!(target instanceof Element)) return null;
+    const row = target.closest('[' + threadAttr + '],[' + projectAttr + ']');
+    if (row) return row;
+    return target.closest(sectionToggle)?.closest(sectionSelector);
   }
   function showForRow(e, row) {
     e.preventDefault();
     e.stopImmediatePropagation();
     if (row.hasAttribute(threadAttr)) open('chat', row.getAttribute(threadAttr));
-    else open('project', row.getAttribute(projectAttr));
+    else if (row.hasAttribute(projectAttr)) open('project', row.getAttribute(projectAttr));
+    else open('section',row.getAttribute(sectionAttr).slice(7));
   }
   window.addEventListener('contextmenu', e => {
     const row = e.shiftKey && targetRow(e.target);
@@ -290,7 +324,11 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     const row = e.altKey && e.shiftKey && e.code === 'KeyC' && targetRow(e.target);
     if (row) showForRow(e, row);
   }, true);
+  window.addEventListener('csc-open-section-colour', e => {
+    if (typeof e.detail === 'string') requestAnimationFrame(() => open('section',e.detail));
+  });
   ready.then(() => {
+    watchPreferencePrefix(sectionStore, refresh);
     watchPreferencePrefix(prefix, refresh);
     refresh();
   });
@@ -303,4 +341,95 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     setPreference(key('chat', temporary), undefined);
   }
   return {menuItem, migrate, activityDay};
+}
+
+// Paint the relationship in the row gutter without changing native order or hit targets.
+function installForkLines() {
+  if (document.getElementById('csc-fork-lines')) return;
+  const attr = 'data-csc-fork-id', selector = '[' + attr + ']';
+  const namespace = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(namespace, 'svg');
+  svg.id = 'csc-fork-lines';
+  svg.setAttribute('aria-hidden', 'true');
+  svg.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2;overflow:hidden;';
+  const path = document.createElementNS(namespace, 'path');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', 'var(--color-text-secondary,GrayText)');
+  path.setAttribute('stroke-opacity', '0.55');
+  path.setAttribute('stroke-width', '1');
+  svg.append(path); document.body.append(svg);
+  let frame, observed, reading = false;
+  const forkParents = new Map(), attempted = new Map();
+  const parentOf = row => row.dataset.cscForkParent || (row.dataset.cscForkHost === 'local' && forkParents.get(row.dataset.cscForkId));
+  function fetchParents(rows) {
+    if (reading || !window.localChatDetails?.forkParents) return;
+    const now = Date.now();
+    const ids = [...new Set(rows.filter(r => r.dataset.cscForkHost==='local' && !r.dataset.cscForkParent)
+      .map(r => r.dataset.cscForkId))].filter(id => !forkParents.has(id) && now-(attempted.get(id)||0)>30000).slice(0,128);
+    if (!ids.length) return;
+    reading = true;
+    for (const id of ids) attempted.set(id,now);
+    window.localChatDetails.forkParents(ids).then(parents => {
+      for (const [id,parent] of Object.entries(parents)) forkParents.set(id,parent);
+    }).catch(() => {}).finally(() => { reading=false; schedule(); });
+  }
+  const sizes = new ResizeObserver(schedule);
+  const lists = new Set();
+  const groupOf = row => row.closest('[role="list"],[data-app-action-sidebar-project-list-id],[data-csc-project-group],[data-sidebar-project-container-id],[data-app-action-sidebar-section]');
+  function afterLayout(event) {
+    if (observed?.contains(event.target)) schedule();
+  }
+  for (const type of ['transitionend', 'animationend', 'transitioncancel', 'animationcancel'])
+    document.addEventListener(type, afterLayout, true);
+  function schedule() { if (!frame) frame = requestAnimationFrame(draw); }
+  function draw() {
+    frame = 0;
+    const rows = Array.from(document.querySelectorAll(selector));
+    fetchParents(rows);
+    const branch = rows.find(parentOf);
+    const sidebar = branch?.closest('[data-app-shell-focus-area="sidebar"],nav,aside') || branch?.parentElement;
+    if (observed !== sidebar) {
+      sizes.disconnect(); lists.clear(); if (sidebar) sizes.observe(sidebar);
+      observed = sidebar;
+    }
+    const nextLists = new Set(branch ? rows.map(groupOf).filter(Boolean) : []);
+    for (const list of lists) if (!nextLists.has(list)) { sizes.unobserve(list); lists.delete(list); }
+    for (const list of nextLists) if (!lists.has(list)) { sizes.observe(list); lists.add(list); }
+    const segments = [];
+    for (const child of rows) {
+      const parentId = parentOf(child);
+      if (!parentId || !child.clientHeight) continue;
+      const a = child.getBoundingClientRect();
+      const choices = rows.filter(row => row !== child && row.getAttribute(attr) === parentId
+        && row.dataset.cscForkHost === child.dataset.cscForkHost && groupOf(row) === groupOf(child) && row.clientHeight);
+      // Prefer the nearest copy when a chat appears in more than one list.
+      choices.sort((x,y) => Math.abs(x.getBoundingClientRect().top-a.top) - Math.abs(y.getBoundingClientRect().top-a.top));
+      if (!choices.length) continue;
+      const parent = choices[0], b = parent.getBoundingClientRect();
+      const y1 = Math.round(b.top+b.height/2)+0.5, y2 = Math.round(a.top+a.height/2)+0.5;
+      const firstLabel = Math.min(...[parent, child].map(row =>
+        (row.querySelector('[data-csc-chat-label]') || row).getBoundingClientRect().left));
+      const x = Math.round(Math.min(a.left + 3, b.left + 3, firstLabel - 7)) + 0.5;
+      // Clipped or virtualised rows must not connect across headers or other panes.
+      if (y1<0 || y2<0 || Math.max(y1,y2)>=innerHeight || x<0) continue;
+      if (!document.elementFromPoint(b.left+6,y1)?.closest(selector)?.isSameNode(parent)
+        || !document.elementFromPoint(a.left+6,y2)?.closest(selector)?.isSameNode(child)) continue;
+      segments.push(`M${x+4},${y1}H${x}V${y2}H${x+4}`);
+    }
+    const d=segments.join(' ');
+    if (path.getAttribute('d')!==d) path.setAttribute('d',d);
+  }
+  new MutationObserver(records => {
+    if (frame) return;
+    for (const r of records) {
+      if (r.type==='attributes' || [...r.addedNodes,...r.removedNodes].some(n =>
+        n.nodeType===1 && (n.matches(selector) || n.querySelector(selector)))) { schedule(); return; }
+    }
+  }).observe(document.body,{subtree:true,childList:true,attributes:true,
+    attributeFilter:[attr,'data-csc-fork-parent','data-csc-fork-host','data-app-shell-sidebar-open','data-app-action-sidebar-section-collapsed']});
+  document.addEventListener('scroll', e => {
+    if (observed && (e.target===document || e.target.contains?.(observed) || observed.contains(e.target))) schedule();
+  },{capture:true,passive:true});
+  window.addEventListener('resize',schedule);
+  schedule();
 }

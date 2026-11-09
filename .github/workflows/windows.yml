@@ -1,0 +1,28 @@
+name: Windows desktop mods
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, windows-port]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check the installer and native Start menu shortcut
+        run: python tests/test_windows.py
+      - name: Install the official ChatGPT desktop package
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pkg = Join-Path $env:RUNNER_TEMP 'ChatGPT-x64.msix'
+          curl.exe --fail --location --retry 2 https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix -o $pkg
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download the official MSIX.' }
+          Add-AppxPackage -Path $pkg
+      - name: Launch the patched Store build with a disposable profile
+        run: python tests/windows_store_smoke.py
