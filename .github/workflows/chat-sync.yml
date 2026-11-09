@@ -16,6 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: npm install -g @openai/codex@0.167.0-alpha.3.2
+      - run: python3 plugins/chat-sync/tests/sidebar_layout_test.py
       - run: python3 plugins/chat-sync/tests/cross_platform.py seed "$RUNNER_TEMP/seed"
       - uses: actions/upload-artifact@v4
         with:
@@ -47,6 +48,7 @@ jobs:
         with:
           name: synthetic-linux-history
           path: ${{ runner.temp }}/transfer
+      - run: python plugins/chat-sync/tests/sidebar_layout_test.py
       - run: python plugins/chat-sync/tests/cross_platform.py reply "$env:RUNNER_TEMP/transfer"
       - uses: actions/upload-artifact@v4
         with:

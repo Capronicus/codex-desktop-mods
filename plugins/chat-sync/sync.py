@@ -139,6 +139,8 @@ def set_exchange_option(option, enabled):
         cfg = read_json(CONFIG)
         if not cfg:
             raise ValueError("Choose a private chat sync folder first.")
+        if option == "sidebar" and not enabled:
+            (STATE / "sidebar-layout-pending.json").unlink(missing_ok=True)
         cfg[option] = enabled
         atomic(CONFIG, encode(cfg))
     return status()
@@ -548,6 +550,7 @@ def run(automatic=False):
         index = catalog()
         local_files = streams()
         snapshots = {}
+        imported_ids = set()
         stats = {
             "exported": 0,
             "imported": 0,
@@ -621,6 +624,7 @@ def run(automatic=False):
                         state[tid].pop("token", None)
                     continue
                 materialize(vault, best, snap, index.get(tid, {}).get("cwd"))
+                imported_ids.add(tid)
                 # Carry the name until the native app server indexes the rollout.
                 state[tid] = {"manifest": best, "pending_name": best.get("name")}
                 stats["updated" if current else "imported"] += 1
@@ -650,7 +654,7 @@ def run(automatic=False):
             import sidebar
             try:
                 # Only exchange membership for the local human chats this engine handles.
-                stats["sidebar"] = sidebar.exchange(HOME, vault, device, set(state) & set(streams()), atomic, encode)
+                stats["sidebar"] = sidebar.exchange(HOME, vault, device, snapshots.keys() | imported_ids, atomic, encode)
             except (OSError, EOFError, ValueError, sqlite3.Error, subprocess.SubprocessError) as exc:
                 stats["sidebar"] = {"error": str(exc)}
         if cfg.get("colours"):

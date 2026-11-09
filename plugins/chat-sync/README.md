@@ -25,7 +25,7 @@ After configuring the private chat folder, ask **Enable sidebar sync** on each d
 
 The next pass exchanges local Codex project and custom section names, including empty groups. A synced chat can belong to both a project and a section. Subsequent renames, chat moves and removals from a group also travel. Independent groups with identical names keep their own identities. Local group deletion stays local. Pins, display order, cloud-only ChatGPT items and project files stay on their respective desktops.
 
-An imported project starts with no folder attached. Select its local checkout on each computer when needed. If an open sidebar has cached the old layout, fully quit and reopen the desktop app. A chat that arrives before its complete history is available gets its assignments on a subsequent pass.
+An imported project starts with no folder attached. Select its local checkout on each computer when needed. When the sync result shows `desktop_refresh_on_quit`, fully quit the desktop app and reopen it. A local helper applies the queued sidebar changes after the app exits. If the computer shut down first, run sync again. Custom sections appear under the signed-in ChatGPT account. A chat that arrives before its complete history is available gets its assignments on a subsequent pass.
 
 ## Sync sidebar colours
 
