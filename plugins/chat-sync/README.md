@@ -27,6 +27,17 @@ Before exporting changed history, Chat Sync stages the transcript in this device
 
 The panel can also toggle wider chats, the pet dock, scroll animation, timestamps, token counts and branch lines. These switches are local to this computer. Reopen the desktop app with Desktop Mods 0.9.0 or later applied to see changes.
 
+## Chat actions on Home and Work
+
+Both plugins need version 0.12.0 on each participating PC. The desktop menus require the patched launcher. Open **Mod Controls → Chat actions and sharing** for these actions.
+
+- **Open local copy**. Link the receiving project to its checkout. Sync the original desktop with sidebar sync or project linking enabled, then let your folder client finish. Right-click a file reference in a local reply. Preview the file under the receiving checkout, open text files in an editor, or show the folder. If the original project root is unknown, enter the project-relative path. The plugin shares hashes of eligible project roots to match Windows and Linux paths. Files stay on their own computers.
+- **Hand off this reply**. After both desktops have synced once, right-click the reply on Work, select Home, add an optional note and click **Send handoff**. On Home open the pet’s **Reply handoffs** menu or the panel’s inbox. **Read reply** shows the saved message, **Open in chat** navigates to it and **Done** removes it from this PC’s inbox. If history arrives later, the handoff remains available for retry. The note and message identifiers travel through the configured private folder.
+- **Chat branches**. Right-click a local sidebar chat and choose **Chat branches**, then **Show parent and branches**. Choose a parent, sibling or child to open it across sidebar sections. Archived histories participate when present on the device.
+- **Compare conflicting chats**. Select two device snapshots to see the last common visible message and the first twelve later messages on each side. The comparison is read-only. Use the existing branch or adopt actions separately to resolve a conflict.
+- **Check responsiveness**. Start the check, scroll the sidebar and transcript, and switch to another local chat during the twelve-second sample. Refresh the panel to see frame counts, the 95th percentile frame interval and the last measured switch. The measurements stay on this PC.
+- **Project and folder exclusions**. Choose **This PC** or **All connected PCs**. A device-only folder rule includes nested working directories. An all-PC folder rule uses its path relative to a project checkout. Shared rules take effect as updated desktops receive them. If paused, a change takes effect here immediately and is published when sync resumes. Removing one scope’s rule keeps any other matching rules in effect. Earlier copies remain wherever they were shared.
+
 ## What travels
 
 The first sync takes the union of eligible local Codex chats. It includes chat messages, stored tool results, natively recorded fork ancestry and display names. Conversations found in native Zstandard storage require Python 3.14+ or the `zstd` executable. Imported archived chats start archived. Later archive and delete actions apply to the device where you take them.

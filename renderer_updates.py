@@ -111,17 +111,17 @@ def adapt(role, source, files, pet_assets):
         body = replace(body, r'(\w+)\.projectId,!1\)\}\);return eK\(\{archiveEnabled:',r'\1.projectId,!1)});return eK({cscId:\1.projectId,archiveEnabled:',2)
         body = replace(body,r'function eK\(\{archiveEnabled:', 'function eK({cscId,archiveEnabled:')
         body = replace(body,r'("edit-project",icon:\w+\.edit,message:\w+\.edit,onSelect:\w+\},)',
-                       r'\1csc.menuItem("project",cscId),')
+                       r'\1csc.menuItem("project",cscId),...csc.actionItems("project",cscId),')
     elif role == 'linkedmenu':
         memo_header = r'([\w$]+)=\(0,r\.c\)\((\d+)\),\{align:'
         memo, slots = re.search(memo_header, body).groups()
         body = replace(body, memo_header, f'cscId=e.cscProjectId,{memo}=(0,r.c)({int(slots)+1}),{{align:')
         body = replace(body, re.escape(memo)+r'\[16\]!==t\)\{(let [\w,]+;)if\(n=\[\{id:(\w+),message:V',
                        lambda m: f'{memo}[16]!==t||{memo}[{slots}]!==cscId){{{m[1]}{memo}[{slots}]=cscId;'
-                       f'if(n=[...cscId?[csc.menuItem("project",cscId)]:[],{{id:{m[2]},message:V')
+                       f'if(n=[...cscId?[csc.menuItem("project",cscId),...csc.actionItems("project",cscId)]:[],{{id:{m[2]},message:V')
     elif role == 'chatmenu':
         body = replace(body,r'(selectedThreadKeys:(\w+),threadKey:(\w+)\}\)\{if\(\2.length<2\)return )t;',
-                       r'\1[csc.menuItem("chat",\3),...t];')
+                       r'\1[csc.menuItem("chat",\3),...csc.actionItems("chat",\3),...t];')
     elif role == 'cloudmenu':
         body = replace(body,r'id:"organization",items:(\w+)\},\{id:"continue"',
                        r'id:"organization",items:t.surface==="sidebar"&&t.conversationId?[csc.menuItem("chat","chatgpt:conversation:"+t.conversationId),...\1]:\1},{id:"continue"')
@@ -170,7 +170,10 @@ def add_pet_controls(data):
             b',message:' + settings['message'] +
             b'({id:"local.pet.modControls",defaultMessage:"Mod Controls"}),'
             b'selectAfterClose:!0,onSelect:()=>window.localChatDetails.openModControls()},')
-    return data[:settings.end()] + item + data[settings.end():]
+    inbox = (b'{id:"reply-handoffs",icon:' + settings['icon'] + b',message:' + settings['message'] +
+             b'({id:"local.pet.replyHandoffs",defaultMessage:"Reply handoffs"}),selectAfterClose:!0,'
+             b'onSelect:()=>window.localChatDetails.openModControls({action:"inbox"})},')
+    return data[:settings.end()] + item + inbox + data[settings.end():]
 
 
 

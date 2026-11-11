@@ -33,7 +33,8 @@ def preview(group="all", search="", page=0):
         index = sync.catalog(include_titles=True)
         files = sync.streams()
         explicit = set(cfg.get("private_chats", []))
-        private = projects.Sharing(cfg, vault, index, sync.HOME).private_chats
+        sharing = projects.Sharing(cfg, vault, index, sync.HOME)
+        private = sharing.private_chats
         known = sync.read_json(sync.STATE / ("state-" + cfg["device"] + ".json"), {})
         recovery = {p.name for p in (sync.STATE / "pending-projection").glob("*")}
         counts = dict.fromkeys(GROUPS, 0)
@@ -47,7 +48,7 @@ def preview(group="all", search="", page=0):
             name = sync.export_name(row, previous)
             entry = files.get(tid)
             if tid in private:
-                status, reason = "excluded", "chat_rule" if tid in explicit else "project_rule"
+                status, reason = "excluded", "chat_rule" if tid in explicit else ("folder_rule" if tid in sharing.folder_chats else "project_rule")
             elif not entry:
                 status, reason = "unavailable", "multiple_files" if tid in files else "missing_file"
             elif tid in recovery:

@@ -1,6 +1,6 @@
 """Exchange completed Codex conversations through a user-selected private folder."""
 
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime
 import gzip
 import hashlib
@@ -213,9 +213,9 @@ def disable():
         if cfg:
             saved = read_json(STATE / "disconnected.json", {})
             saved.setdefault("devices", {})[cfg["folder"]] = {
-                k: cfg[k] for k in ("device", "device_name", "device_emoji", "origin_since", "project_links") if k in cfg
+                k: cfg[k] for k in ("device", "device_name", "device_emoji", "origin_since", "project_links", "shared_exclusions") if k in cfg
             }
-            saved["exclusions"] = {k: cfg.get(k, []) for k in ("private_chats", "private_projects")}
+            saved["exclusions"] = {k: cfg.get(k, []) for k in ("private_chats", "private_projects", "private_folders")}
             atomic(STATE / "disconnected.json", encode(saved))
         CONFIG.unlink(missing_ok=True)
         for name in ("sidebar-layout-pending.json", "sidebar-preview.json", "last.json"):
@@ -246,7 +246,7 @@ def catalog(include_titles=False):
     if not db.is_file():
         raise ValueError("This profile has no supported local Codex thread catalogue.")
     result = {}
-    with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as conn:
+    with closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as conn:
         conn.row_factory = sqlite3.Row
         columns = "id, rollout_path, name, archived, source, cwd"
         available = {info[1] for info in conn.execute("PRAGMA table_info(threads)")}
@@ -560,7 +560,6 @@ def invalidate_projection(tid):
     }
     # This database contains only the timeline projection. Codex rebuilds the
     # rows from the rollout when it next opens the chat. Refuse unfamiliar layouts.
-    from contextlib import closing
 
     with closing(sqlite3.connect(db.as_uri() + "?mode=rw", uri=True, timeout=2)) as conn:
         known = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -724,9 +723,16 @@ def run(automatic=False):
         index = catalog()
         import projects, delivery
 
-        projects.publish_links(cfg, vault)
+        import sharing_rules
+        sharing_rules.exchange(cfg, vault)
         sharing = projects.Sharing(cfg, vault, index, HOME)
         private = sharing.private_chats
+        publication = {**cfg, "private_projects": list(sharing.private_projects),
+                       "private_folders": sharing.excluded_folders}
+        projects.publish_links(publication, vault)
+        if cfg.get("project_links") or cfg.get("sidebar") or (vault / "file-roots-v1" / (device + ".json")).exists():
+            import chat_actions
+            chat_actions.publish_roots(publication, vault)
         busy.difference_update(private)
         if "origin_since" not in cfg:
             cfg["origin_since"] = time.time()
@@ -807,6 +813,9 @@ def run(automatic=False):
                     continue
                 if tid not in local_files and tid in state:
                     continue  # A locally removed thread stays removed here.
+                if sharing.blocks_incoming(vault, tid, copies.values()):
+                    private.add(tid)
+                    continue
                 snap = snapshots.get(tid)
                 current = snap and snap["manifest"]
                 best, up_to_date = latest_history(vault, list(copies.values()), current)

@@ -49,7 +49,7 @@ def main():
         for field in fields:
             command_parser.add_argument(field)
     privacy = sub.add_parser("local-only")
-    privacy.add_argument("kind", choices=("chat", "project"))
+    privacy.add_argument("kind", choices=("chat", "project", "folder"))
     privacy.add_argument("ident")
     privacy.add_argument("mode", choices=("on", "off"))
     for action in ("keep-branch", "adopt"):

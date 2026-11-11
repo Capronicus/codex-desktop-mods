@@ -37,6 +37,12 @@ Install **Codex Chat Sync** from the same marketplace, then open **Mod Controls*
 
 The six appearance switches work without connecting a folder.
 
+## Files, reply handoffs and chat actions
+
+Update **Codex Desktop Mods** and **Codex Chat Sync** to **0.12.0** on both PCs, apply the desktop mods, then fully quit and reopen the app. Right-click a local assistant reply for **Open local copy** or **Hand off this reply**. Shift + right-click keeps the regular text menu. Right-click a local sidebar chat for **Chat branches** or a project for **Project sharing**.
+
+Open **Mod Controls → Chat actions and sharing** for the handoff inbox, conflict comparison, project or folder exclusions and the 12-second desktop responsiveness check. [Using chat actions on Home and Work](plugins/chat-sync/README.md#chat-actions-on-home-and-work)
+
 ## Install Chat Organizer on Windows or Linux
 
 In **Plugins**, refresh the **Capronicus Desktop Mods** marketplace. To add it for the first time, choose **Add → Add marketplace** and enter `https://github.com/Capronicus/codex-desktop-mods`. Select **Chat Organizer** and click **Install**. In a new chat, select the plugin and ask **“Preview a cleanup of my sidebar.”**

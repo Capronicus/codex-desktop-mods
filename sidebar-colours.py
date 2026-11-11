@@ -64,9 +64,9 @@ def modify(js):
     js = subst(js, 'return T6n({archiveEnabled:', 'return T6n({cscProject:r.projectId,archiveEnabled:', 2)
     js = subst(js, 'function T6n({archiveEnabled:e', 'function T6n({cscProject,archiveEnabled:e')
     js = subst(js, 'icon:d0.edit,message:f0.edit,onSelect:a},...m.length',
-               'icon:d0.edit,message:f0.edit,onSelect:a},sidebarColours.menuItem("project",cscProject),...m.length')
+               'icon:d0.edit,message:f0.edit,onSelect:a},sidebarColours.menuItem("project",cscProject),...sidebarColours.actionItems("project",cscProject),...m.length')
     js = subst(js, 'selectedThreadKeys:i,threadKey:a}){if(i.length<2)return t;',
-               'selectedThreadKeys:i,threadKey:a}){if(i.length<2)return [sidebarColours.menuItem("chat",a),...t];')
+               'selectedThreadKeys:i,threadKey:a}){if(i.length<2)return [sidebarColours.menuItem("chat",a),...sidebarColours.actionItems("chat",a),...t];')
     # Carry the native last-update timestamps through the local, remote task and
     # pending row adapters. Updating the colour never writes to a chat's history.
     for fields, timestamp in [
@@ -97,7 +97,7 @@ def modify(js):
     js = subst(js, 'function qJn(e){"use forget";let t=(0,XJn.c)(59)',
                'function qJn(e){"use forget";let cscProjectId=e.projectId,t=(0,XJn.c)(60)')
     js = subst(js, 't[16]!==E){if(D=[{id:C,message:w,icon:T,onSelect:E},',
-               't[16]!==E||t[59]!==cscProjectId){t[59]=cscProjectId;if(D=[sidebarColours.menuItem("project",cscProjectId),'
+               't[16]!==E||t[59]!==cscProjectId){t[59]=cscProjectId;if(D=[sidebarColours.menuItem("project",cscProjectId),...sidebarColours.actionItems("project",cscProjectId),'
                '{id:C,message:w,icon:T,onSelect:E},')
     # Module declarations/imports remain at top level. The code runs before the
     # first call of an exported lazy component, independently of load order.
