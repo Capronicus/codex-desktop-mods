@@ -163,14 +163,14 @@ def set_exchange_option(option, enabled):
         cfg = read_json(CONFIG)
         if not cfg:
             raise ValueError("Choose a private chat sync folder first.")
-        if option == "sidebar" and not enabled:
-            (STATE / "sidebar-layout-pending.json").unlink(missing_ok=True)
         if option == "order" and enabled and not cfg.get("sidebar"):
             raise ValueError("Enable sidebar sync before syncing pins and order.")
         if option == "sidebar" and not enabled:
             cfg["order"] = False
         if option in ("sidebar", "order") and not enabled:
-            (STATE / "sidebar-layout-pending.json").unlink(missing_ok=True)
+            queue = STATE / "sidebar-layout-pending.json"
+            if not read_json(queue, {}).get("undo"):
+                queue.unlink(missing_ok=True)
         cfg[option] = enabled
         atomic(CONFIG, encode(cfg))
     return status()

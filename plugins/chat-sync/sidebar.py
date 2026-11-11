@@ -100,6 +100,7 @@ def exchange(
     sharing=None,
     action="sync",
     approval="",
+    chat_index=None,
 ):
     directory = vault / "sidebar-v1"
     state_path = home / "chat-sync" / ("sidebar-" + device + ".json")
@@ -264,6 +265,9 @@ def exchange(
     preview_file = home / "chat-sync" / "sidebar-preview.json"
     reviewed = state.get("reviewed", False)
     if action == "preview":
+        review["names"] = batches.preview_names(changes, rows, current, chat_index or {})
+        review["sections_need_sign_in"] = not section_access
+        review["deferred_devices"] = deferred
         return review
     if action == "apply" and approval != review["id"]:
         raise ValueError("The sidebar preview changed. Request a fresh preview.")

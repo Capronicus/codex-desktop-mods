@@ -215,6 +215,9 @@ def run():
                 assert (
                     pre["counts"]["project_created"] == 1 and pre["counts"]["section_created"] == 1
                 ), pre
+                assert pre["names"]["project/" + local] == "Linked", pre["names"]
+                assert pre["names"]["section/" + section] == "Later", pre["names"]
+                assert q not in str(pre) and secret not in str(pre) and individual not in str(pre)
                 try:
                     batches.review("apply", "stale")
                 except ValueError:
@@ -235,7 +238,13 @@ def run():
                 with closing(App(dst)) as app:
                     resumed = app.call("thread/resume", {"threadId": tid})["thread"]
                     assert Path(resumed["cwd"]).resolve() == b.resolve(), resumed["cwd"]
-                result = batches.undo()
+                try:
+                    batches.undo("stale")
+                except ValueError as exc:
+                    assert "newer sidebar batch" in str(exc)
+                else:
+                    raise AssertionError("Undid a different batch")
+                result = batches.undo(pre["id"])
                 assert result["sidebar"] is False
                 restored = desktop_layout.Layout(dst)
                 assert set(restored.projects) == {local} and not restored.sections

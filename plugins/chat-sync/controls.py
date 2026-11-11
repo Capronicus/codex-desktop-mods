@@ -3,7 +3,9 @@
 from collections import Counter
 from pathlib import Path
 
+import batches
 import delivery
+import desktop_layout
 import sync
 
 FEATURES = ("wideChat", "petDock", "petMotion", "timestamps", "tokens", "branchLines")
@@ -42,6 +44,14 @@ def status():
             item = peers.setdefault(peer["device"], {"name": peer["name"], "received": 0})
             item["received"] += 1
     rules = cfg or sync.read_json(sync.STATE / "disconnected.json", {}).get("exclusions", {})
+    journal = queue = {}
+    if device:
+        journal = sync.read_json(sync.STATE / batches.JOURNAL, {})
+        queue = sync.read_json(sync.STATE / desktop_layout.QUEUE, {})
+        if journal.get("device") != device:
+            journal = {}
+        if queue.get("device") != device:
+            queue = {}
     return {
         "configured": bool(device), "device": delivery.label(cfg) if device else None,
         "deviceEmoji": cfg.get("device_emoji", ""),
@@ -50,6 +60,12 @@ def status():
         "options": {k: bool(cfg.get(k)) for k in ("colours", "settings", "sidebar", "order")},
         "health": health, "receipts": counts, "peers": list(peers.values()),
         "integrity": sync.last_folder_check(cfg),
+        "sidebarReview": {
+            "undoBatch": journal.get("id"),
+            "lastApplied": journal.get("updated_at"),
+            "queued": ("undo" if queue.get("undo") else "apply") if queue else None,
+            "required": bool(cfg.get("sidebar") and (sync.STATE / "sidebar-preview.json").is_file()),
+        },
         "privateChats": rules.get("private_chats", []), "privateProjects": rules.get("private_projects", []),
         "visuals": visuals(),
     }

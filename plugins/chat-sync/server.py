@@ -38,6 +38,8 @@ TOOLS = [
      "title": "Mod Controls", "_meta": {"ui": {"resourceUri": controls.URI},
                "openai/ui": {"entrypoints": [{"type": "global"}]}}},
     tool("mod_controls_status", "Read local sync health, receipt counts and visual preferences.", readonly=True),
+    {**tool("undo_sidebar_batch", "Undo the sidebar batch displayed in Mod Controls.",
+            {"batch": {"type": "string"}}), "_meta": {"ui": {"visibility": ["app"]}}},
     tool("set_sync_device_label", "Name this desktop and choose one origin emoji. An empty emoji removes it.",
          {"name": {"type": "string"}, "emoji": {"type": "string"}}),
     tool("check_sync_folder", "Verify the blocks referenced by current shared chat revisions and save a local report.", readonly=True),
@@ -161,6 +163,7 @@ ACTIONS = {
     "preview_sidebar_sync": batches.review,
     "apply_sidebar_preview": lambda batch: batches.review("apply", batch),
     "undo_sidebar_sync": batches.undo,
+    "undo_sidebar_batch": batches.undo,
     "set_pin_order_sync": lambda enabled: sync.set_exchange_option("order", enabled),
     "chat_sync_status": sync.status,
     "set_settings_sync": lambda enabled: sync.set_exchange_option("settings", enabled),
@@ -198,7 +201,7 @@ def handle(req):
         version = params.get("protocolVersion")
         return {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[0],
-            "serverInfo": {"name": "chat-sync", "version": "0.9.2"},
+            "serverInfo": {"name": "chat-sync", "version": "0.10.0"},
             "capabilities": {"tools": {}, "resources": {}},
         }
     if method == "ping":

@@ -1,6 +1,6 @@
 {
   "name": "chat-sync",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "description": "Sync local Codex chat histories across desktop profiles.",
   "interface": {
     "displayName": "Codex Chat Sync",

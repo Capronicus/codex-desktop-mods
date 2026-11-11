@@ -5,6 +5,8 @@ description: Sync local Codex conversations across desktop profiles using a user
 
 For “Open Mod Controls”, call open_mod_controls. Use set_sync_paused when the user asks to pause or resume transfers. The panel shows last-attempt and receipt information and controls this computer’s visual settings. Fully reopen the patched desktop app to apply appearance switches.
 
+In Mod Controls, **Sidebar changes** lets the user preview incoming changes, apply the displayed batch or undo the latest batch locally. Undo also works while transfers are paused. If the panel reports queued changes, fully quit and reopen the desktop to see the result.
+
 For a stuck transfer, use check_sync_folder to check the current shared revisions. When asked to repair, use repair_sync_folder on a connected, unpaused desktop with a local copy. Report blocks restored and what still needs another desktop or a folder download.
 
 For a status request call chat_sync_status. When setting up, use the exact existing private folder chosen by the user. The folder receives Codex transcripts including prompts, replies, tool input and output. Confirm the location and whether automatic exchange is wanted if either is unspecified. A Nextcloud, OneDrive, Google Drive or NAS folder works if files are available locally on each computer.
