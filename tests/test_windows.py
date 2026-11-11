@@ -26,14 +26,16 @@ class PythonLauncherTests(unittest.TestCase):
             python.touch()
             alias = root / 'python3.exe'
             store = root / 'WindowsApps/python3.exe'
+            store.parent.mkdir()
+            selected = store.parent / '..' / alias.name
 
             def resolve(_):
-                return str(alias if alias.exists() else store)
+                return str(selected if alias.exists() else store)
 
             with patch.object(launcher.sys, 'executable', str(python)), \
                  patch.object(Path, 'home', return_value=root), \
                  patch.object(launcher.shutil, 'which', side_effect=resolve), \
-                 patch.object(launcher, 'working_python', side_effect=lambda p: Path(p) == alias):
+                 patch.object(launcher, 'working_python', side_effect=lambda p: Path(p) == selected):
                 launcher.setup()
                 self.assertTrue(alias.samefile(python))
                 launcher.setup()

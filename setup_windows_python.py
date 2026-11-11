@@ -40,7 +40,7 @@ def setup():
         os.link(python, alias)
     try:
         selected = shutil.which("python3.exe")
-        if not selected or Path(selected) != alias or not working_python(selected):
+        if not selected or Path(selected).resolve() != alias.resolve() or not working_python(selected):
             raise ValueError(f"Place {python.parent} before WindowsApps on your user PATH, then retry.")
     except BaseException:
         alias.unlink()
