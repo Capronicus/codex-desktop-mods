@@ -10,6 +10,20 @@
   const cache = new Map();
   const maxLine = 2 * 1024 * 1024;
 
+  // The preload takes one local snapshot per window before mounting the visual mods.
+  ipcMain.on?.('local-mod-controls:visuals', event => {
+    let values = {};
+    const frame = event.senderFrame;
+    if (frame && frame === event.sender.mainFrame && /^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(frame.url)) {
+      try {
+        const saved = JSON.parse(require('node:fs').readFileSync(path.join(home, 'desktop-mod-controls.json'), 'utf8'));
+        const keys = ['wideChat', 'petDock', 'petMotion', 'timestamps', 'tokens', 'branchLines'];
+        values = Object.fromEntries(keys.map(key => [key, saved[key] !== false]));
+      } catch { /* First run uses the existing desktop defaults. */ }
+    }
+    event.returnValue = values;
+  });
+
   async function findFile(id) {
     // UUIDv7 encodes the start time. Rollouts use the host's date at creation.
     const date = parseInt(id.replaceAll('-', '').slice(0, 12), 16);

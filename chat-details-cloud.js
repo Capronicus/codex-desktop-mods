@@ -16,6 +16,7 @@ function CloudChatTime({conversationId,messageId,role,fallback}) {
     children:$.jsx('time',{dateTime:date.toISOString(),title:date.toLocaleString(),children:chatDetailsCloudFormat.format(date)})});
 }
 function withCloudChatTime(content,item,conversationId) {
+  if (window.localChatDetails?.visuals?.timestamps === false) return content;
   const role=item.type==='user-message'?'user':item.type==='assistant-message'?'assistant':null;
   const messageId=item.latestMessageId??item.messageId;
   if(!content || !role || !messageId || !conversationId)return content;

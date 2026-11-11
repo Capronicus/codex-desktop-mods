@@ -23,6 +23,8 @@ const cscLayoutCSS = `
 `;
 
 function cscTrackChat(place, animate) {
+  const visuals = window.localChatDetails?.visuals || {};
+  if (visuals.wideChat === false && visuals.petDock === false) return () => {};
   const style = document.createElement('style');
   style.textContent = cscLayoutCSS;
   document.head.append(style);
@@ -67,7 +69,8 @@ function cscTrackChat(place, animate) {
         clearTimeout(stopTimer);
         setMotion('idle');
         lastTop = next?.scrollTop;
-        next?.addEventListener('scroll', onScroll, {passive: true});
+        if (visuals.petDock !== false && visuals.petMotion !== false)
+          next?.addEventListener('scroll', onScroll, {passive: true});
       }
       scroll = next; content = nextContent; pane = nextPane; card = nextCard;
       resize.disconnect();
@@ -78,8 +81,8 @@ function cscTrackChat(place, animate) {
     const body = content.parentElement.getBoundingClientRect();
     const panel = card?.getBoundingClientRect();
     const hasPanel = panel?.width > 0 && panel.left > bounds.left + bounds.width / 2;
-    if (body.width >= 945) {
-      const end = hasPanel ? panel.left - 12 : bounds.right - 106;
+    if (visuals.wideChat !== false && body.width >= 945) {
+      const end = hasPanel ? panel.left - 12 : bounds.right - (visuals.petDock === false ? 0 : 106);
       const reserve = Math.max(0, Math.ceil(body.right - end));
       const width = Math.floor(Math.min(1152, body.width - reserve - 24));
       if (width >= 768) {
@@ -88,6 +91,7 @@ function cscTrackChat(place, animate) {
         scroll.style.setProperty('--csc-chat-width', width + 'px');
       } else clearWidth();
     } else clearWidth();
+    if (visuals.petDock === false) return;
     const right = Math.max(content.getBoundingClientRect().right,
       scroll.querySelector(cscFooter)?.getBoundingClientRect().right ?? 0);
     const gap = bounds.right - right;

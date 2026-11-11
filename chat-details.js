@@ -68,12 +68,12 @@ function ChatDetailLine({entry,role,React,jsx}) {
   const stamp=user ? block?.item?.sentAtMs??turn?.turnStartedAtMs??record?.start
     : block?.item?.sentAtMs??record?.reply??turn?.finalAssistantStartedAtMs;
   const text=[];
-  if(Number.isFinite(stamp) && stamp>0) {
+  if(window.localChatDetails?.visuals?.timestamps !== false && Number.isFinite(stamp) && stamp>0) {
     const date=new Date(stamp);
     if(Number.isFinite(date.getTime()))text.push(jsx.jsx('time',{dateTime:date.toISOString(),title:date.toLocaleString(),children:chatDetailDate.format(date)},'time'));
   }
   const finished=record?.end || ['completed','interrupted','failed'].includes(entry.turnStatus??turn?.status);
-  if(!user && finalBlock && finished && Number.isSafeInteger(record?.total)){
+  if(window.localChatDetails?.visuals?.tokens !== false && !user && finalBlock && finished && Number.isSafeInteger(record?.total)){
     const total=chatDetailNumber.format(record.total);
     const usage=Number.isSafeInteger(record.tokens)?chatDetailNumber.format(record.tokens)+' tokens this turn · '+total+' chat total':total+' tokens in chat';
     text.push(jsx.jsx('span',{title:'Recorded input and output tokens across all model calls. Chat total through this turn.',children:usage},'tokens'));
@@ -83,9 +83,11 @@ function ChatDetailLine({entry,role,React,jsx}) {
 }
 
 function withChatDetails(entry, row, React, jsx) {
+  const visuals = window.localChatDetails?.visuals;
+  if (visuals?.timestamps === false && visuals?.tokens === false) return row;
   if (!entry.turnId || !entry.conversationId || entry.liveVoiceSource || entry.type) return row;
   const type=entry.transcriptBlock?.type;
   if(type && type!=='user-message' && type!=='assistant-message')return row;
-  const line=role=>jsx.jsx(ChatDetailLine,{entry,role,React,jsx},role);
+  const line=role=>role==='user' && visuals?.timestamps===false ? null : jsx.jsx(ChatDetailLine,{entry,role,React,jsx},role);
   return jsx.jsxs(jsx.Fragment,{children:[(!type || type==='user-message')&&line('user'),row,(!type || type==='assistant-message')&&line('assistant')]});
 }

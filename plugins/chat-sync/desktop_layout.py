@@ -294,6 +294,8 @@ def apply_pending(home):
     plan = sync.read_json(path)
     if not plan:
         return True
+    if cfg.get("paused"):
+        return False
     if not cfg.get("sidebar") or cfg["device"] != plan["device"]:
         path.unlink(missing_ok=True)
         return True
@@ -382,7 +384,7 @@ def finish_on_exit(home):
     with sync.lock(directory / "sidebar-exit.lock"):
         while (directory / QUEUE).is_file():
             cfg = sync.read_json(directory / "config.json", {})
-            if not cfg.get("sidebar"):
+            if not cfg.get("sidebar") or cfg.get("paused"):
                 return
             pid = desktop_pid()
             if pid is not None:

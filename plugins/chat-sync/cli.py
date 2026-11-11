@@ -20,6 +20,8 @@ def main():
     sub.add_parser("sync-settings")
     sub.add_parser("settings").add_argument("mode", choices=("on", "off"))
     sub.add_parser("disable")
+    sub.add_parser("pause")
+    sub.add_parser("resume")
     sub.add_parser("watch")
     sub.add_parser("sidebar").add_argument("mode", choices=("on", "off"))
     sub.add_parser("colours").add_argument("mode", choices=("on", "off"))
@@ -50,6 +52,8 @@ def main():
             result = sync.setup(args.folder, args.automatic)
         elif args.command in ("sidebar", "colours", "order", "settings"):
             result = sync.set_exchange_option(args.command, args.mode == "on")
+        elif args.command in ("pause", "resume"):
+            result = sync.set_paused(args.command == "pause")
         elif args.command == "local-only":
             result = projects.set_private(args.kind, args.ident, args.mode == "on")
         elif args.command in (
@@ -74,9 +78,10 @@ def main():
                 **{k: v for k, v in vars(args).items() if k != "command"}
             )
         elif args.command == "watch":
-            while sync.read_json(sync.CONFIG):
+            while cfg := sync.read_json(sync.CONFIG):
                 try:
-                    print(json.dumps(sync.run()), flush=True)
+                    if not cfg.get("paused"):
+                        print(json.dumps(sync.run()), flush=True)
                 except (
                     sync.Busy,
                     OSError,

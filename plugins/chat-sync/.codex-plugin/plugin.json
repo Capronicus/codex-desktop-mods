@@ -1,6 +1,6 @@
 {
   "name": "chat-sync",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Sync local Codex chat histories across desktop profiles.",
   "interface": {
     "displayName": "Codex Chat Sync",
@@ -11,7 +11,7 @@
       "Read",
       "Write"
     ],
-    "defaultPrompt": "Check chat sync status.",
+    "defaultPrompt": "Open Mod Controls.",
     "developerName": "Capronicus"
   },
   "requires_local_executor": true,
