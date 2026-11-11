@@ -16,6 +16,7 @@ from cross_platform import start
 sys.path.insert(0, str(ROOT.parent))
 import sync
 import projects
+import outgoing
 import delivery
 import colours
 import batches
@@ -151,6 +152,10 @@ def run():
                 sync.set_exchange_option("order", True)
                 assert not projects.set_private("project", q, True)["previously_shared"]
                 assert not projects.set_private("chat", individual, True)["previously_shared"]
+                sharing_preview = {r["id"]:r for r in outgoing.preview()["chats"]}
+                assert sharing_preview[secret]["reason"] == "project_rule"
+                assert sharing_preview[individual]["reason"] == "chat_rule"
+                assert sharing_preview[tid]["group"] == "pending"
                 # Upgrade an existing installation with Electron colours and no SQLite seed.
                 state = sync.read_json(src / ".codex-global-state.json")
                 prefix = "codex.sidebar-colours.v1/"

@@ -7,6 +7,7 @@ import time
 import sync
 import projects, delivery, batches
 import integrity
+import outgoing
 
 
 def main():
@@ -17,6 +18,10 @@ def main():
     setup.add_argument("folder")
     setup.add_argument("--automatic", action="store_true")
     sub.add_parser("sync")
+    sharing = sub.add_parser("preview-sharing")
+    sharing.add_argument("--group", choices=("all", *outgoing.GROUPS), default="all")
+    sharing.add_argument("--search", default="")
+    sharing.add_argument("--page", type=int, default=0)
     sub.add_parser("check-folder")
     sub.add_parser("repair-folder")
     sub.add_parser("sync-colours")
@@ -108,6 +113,8 @@ def main():
             result = sync.sync_colours_now()
         elif args.command in ("check-folder", "repair-folder"):
             result = integrity.inspect_folder(repair=args.command == "repair-folder")
+        elif args.command == "preview-sharing":
+            result = outgoing.preview(args.group, args.search, args.page)
         elif args.command == "sync":
             result = sync.run()
         else:

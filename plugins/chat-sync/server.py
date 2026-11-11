@@ -13,12 +13,13 @@ import batches
 import activation
 import controls
 import integrity
+import outgoing
 
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 STOP = threading.Event()
 
 
-def tool(name, description, fields=None, readonly=False):
+def tool(name, description, fields=None, readonly=False, optional=()):
     fields = fields or {}
     return {
         "name": name,
@@ -26,7 +27,7 @@ def tool(name, description, fields=None, readonly=False):
         "inputSchema": {
             "type": "object",
             "properties": fields,
-            "required": list(fields),
+            "required": [key for key in fields if key not in optional],
             "additionalProperties": False,
         },
         "annotations": {"readOnlyHint": readonly},
@@ -38,6 +39,10 @@ TOOLS = [
      "title": "Mod Controls", "_meta": {"ui": {"resourceUri": controls.URI},
                "openai/ui": {"entrypoints": [{"type": "global"}]}}},
     tool("mod_controls_status", "Read local sync health, receipt counts and visual preferences.", readonly=True),
+    tool("preview_chat_sharing", "Preview outgoing local chats and exclusions without transferring histories. Pages start at zero.",
+         {"group": {"type": "string", "enum": ["all", *outgoing.GROUPS]},
+          "search": {"type": "string", "maxLength": 256}, "page": {"type": "integer", "minimum": 0}},
+         readonly=True, optional=("group", "search", "page")),
     {**tool("undo_sidebar_batch", "Undo the sidebar batch displayed in Mod Controls.",
             {"batch": {"type": "string"}}), "_meta": {"ui": {"visibility": ["app"]}}},
     tool("set_sync_device_label", "Name this desktop and choose one origin emoji. An empty emoji removes it.",
@@ -147,6 +152,7 @@ TOOLS = [
 ACTIONS = {
     "open_mod_controls": controls.status,
     "mod_controls_status": controls.status,
+    "preview_chat_sharing": outgoing.preview,
     "mod_controls_sync": controls.sync_now,
     "check_sync_folder": integrity.inspect_folder,
     "repair_sync_folder": lambda: integrity.inspect_folder(repair=True),
@@ -201,7 +207,7 @@ def handle(req):
         version = params.get("protocolVersion")
         return {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[0],
-            "serverInfo": {"name": "chat-sync", "version": "0.10.0"},
+            "serverInfo": {"name": "chat-sync", "version": "0.11.0"},
             "capabilities": {"tools": {}, "resources": {}},
         }
     if method == "ping":
@@ -218,14 +224,13 @@ def handle(req):
         raise ValueError("Unknown method or tool")
     name = params["name"]
     args = params.get("arguments", {})
-    fields = next(t["inputSchema"]["properties"] for t in TOOLS if t["name"] == name)
+    schema = next(t["inputSchema"] for t in TOOLS if t["name"] == name)
+    fields = schema["properties"]
+    types = {"string": str, "boolean": bool, "integer": int}
     if (
         not isinstance(args, dict)
-        or args.keys() != fields.keys()
-        or any(
-            not isinstance(args[k], bool if f["type"] == "boolean" else str)
-            for k, f in fields.items()
-        )
+        or not set(schema.get("required", ())) <= args.keys() <= fields.keys()
+        or any(type(value) is not types[fields[key]["type"]] for key, value in args.items())
     ):
         raise ValueError("Invalid tool arguments")
     try:

@@ -13,6 +13,8 @@ The installed plugin folder contains `sync.py`. Run `python3 /path/to/sync.py st
 
 ## Mod Controls
 
+Choose **Chat sync → Preview outgoing chats** to see which local histories are new or changed, unchanged, excluded, unavailable or awaiting a source or recovery check. Search by title or chat ID. **Keep local** excludes a chat from future transfers, and **Remove chat rule** clears its individual exclusion. Project rules still apply. Previewing works while paused and reads file metadata without opening transcripts or writing to the shared folder. **Resume sync** is a separate action. The CLI equivalent is `python3 sync.py preview-sharing`, with optional `--search`, `--group` and zero-based `--page`.
+
 With **Projects and sections** enabled, open **Mod Controls → Sidebar changes → Preview changes**. Review the affected projects, sections, chats and pins, then choose **Apply reviewed changes**. If another desktop changes the batch, preview again. After the first approval, later syncs can apply incoming sidebar changes automatically. **Undo last batch** restores the previous sidebar on this desktop and turns off sidebar and order sync here. The panel shows when changes will finish on quit.
 
 In **Device name and emoji**, choose a name and an optional emoji for this desktop. The CLI equivalent is `python3 sync.py name Work --emoji "💼"`. Clear the emoji to hide the origin label. After both desktops sync, Desktop Mods 0.10.0 shows it beside the chat title and above the composer. **Started on** identifies a recorded origin. **First seen on** identifies the first desktop to share an older chat. Ambiguous origins get no badge. Local file paths still refer to their original computer.
