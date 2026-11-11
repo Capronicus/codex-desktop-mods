@@ -9,12 +9,53 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import windows_mods as mods
+import setup_windows_python as launcher
 
 
 def archive(path, value):
     data = json.dumps({'files': {}, 'fixture': value}).encode()
     size = (len(data) + 7) & ~3
     path.write_bytes(struct.pack('<IIII', 4, size + 4, size, len(data)) + data + bytes(size - len(data) - 4))
+
+
+class PythonLauncherTests(unittest.TestCase):
+    def test_store_alias_and_repeat_setup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            python = root / 'python.exe'
+            python.touch()
+            alias = root / 'python3.exe'
+            store = root / 'WindowsApps/python3.exe'
+
+            def resolve(_):
+                return str(alias if alias.exists() else store)
+
+            with patch.object(launcher.sys, 'executable', str(python)), \
+                 patch.object(Path, 'home', return_value=root), \
+                 patch.object(launcher.shutil, 'which', side_effect=resolve), \
+                 patch.object(launcher, 'working_python', side_effect=lambda p: Path(p) == alias):
+                launcher.setup()
+                self.assertTrue(alias.samefile(python))
+                launcher.setup()
+                self.assertTrue(alias.samefile(python))
+
+    def test_precedence_failure_rolls_back_and_preserves_existing_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            python = root / 'python.exe'
+            python.touch()
+            alias = root / 'python3.exe'
+            with patch.object(launcher.sys, 'executable', str(python)), \
+                 patch.object(Path, 'home', return_value=root), \
+                 patch.object(launcher.shutil, 'which', return_value=str(python.parent / 'elsewhere')), \
+                 patch.object(launcher, 'working_python', return_value=False):
+                with self.assertRaisesRegex(ValueError, 'PATH'):
+                    launcher.setup()
+                self.assertFalse(alias.exists())
+                alias.write_bytes(b'existing')
+                with self.assertRaisesRegex(ValueError, 'No file was replaced'):
+                    launcher.setup()
+                self.assertEqual(alias.read_bytes(), b'existing')
 
 
 class WindowsModsTests(unittest.TestCase):

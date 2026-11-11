@@ -1,9 +1,8 @@
 from native_fixture import App, prepare, ROOT
 from pathlib import Path
-import os, sys, subprocess, json, shutil
+import os, sys, subprocess, json
 import tempfile
 
-root = Path(tempfile.mkdtemp(prefix="chat-sync-roundtrip-"))
 pkg = ROOT.parent
 
 
@@ -27,6 +26,8 @@ def hist(app, tid):
 
 
 if __name__ == "__main__":
+    temp = tempfile.TemporaryDirectory(prefix="chat-sync-roundtrip-")
+    root = Path(temp.name)
     model = subprocess.Popen(
         [
             "node",
@@ -149,4 +150,4 @@ if __name__ == "__main__":
             app.close()
         model.terminate()
         model.wait()
-        shutil.rmtree(root)
+        temp.cleanup()

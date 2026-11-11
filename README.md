@@ -13,7 +13,7 @@ Windows support targets desktop version `26.1103.32239` (Store package `OpenAI.C
 
 1. Open **Plugins → Add → Add marketplace**, choose the repository option and enter `https://github.com/Capronicus/codex-desktop-mods`.
 2. Select **Capronicus Desktop Mods** in the marketplace picker, then install **Codex Desktop Mods**.
-3. Open a new chat with the plugin and ask **Apply the desktop mods**. The plugin's local tools require Python 3.9 or later on PATH as `python3`. On Windows, `python3 --version` in PowerShell should print the installed version.
+3. Open a new chat with the plugin and ask **Apply the desktop mods**. The plugin's local tools require Python 3.9 or later on PATH as `python3`. Chat Sync needs Python 3.10 or later. On Windows, if `py -3` works but `python3` opens the Store, run `py -3 setup_windows_python.py` from the extracted repository. This adds a second executable name beside your per-user Python interpreter. Plugin updates can then use the shipped manifests. If ChatGPT was already open, switch Chat Sync off and on in Settings > Plugins to refresh discovery.
 4. Fully quit ChatGPT, including its tray window. On Windows, open **ChatGPT (Desktop Mods)** from Start. On Linux, open **ChatGPT** from the applications menu.
 
 For the command-line marketplace workflow, run:
