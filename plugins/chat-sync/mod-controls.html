@@ -11,6 +11,9 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid
 dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0}dt,.hint{color:var(--color-text-secondary,GrayText)}dd{margin:0;overflow-wrap:anywhere}summary{cursor:pointer}details{margin-top:12px}#rules{white-space:pre-line;overflow-wrap:anywhere}#notice:not(:empty){padding:10px;border:1px solid currentColor;border-radius:8px;margin:12px 0}ul{padding-inline-start:22px}#overview{font-weight:650}button[hidden],[hidden]{display:none!important}@media(max-width:400px){dl{grid-template-columns:1fr;gap:0}dd{margin-bottom:5px}}
 #device-form{display:flex;align-items:end;gap:12px;flex-wrap:wrap;padding:8px 0}#device-form label{display:grid;gap:4px}
 #device-form input{box-sizing:border-box;background:Canvas;color:CanvasText;border:1px solid GrayText;border-radius:6px;padding:6px 9px;font:inherit;max-width:100%}#emoji{width:6rem}
+#change-list{list-style:none;margin:0;padding:0;overflow-wrap:anywhere}
+#change-list li{border-top:1px solid color-mix(in srgb,currentColor 13%,transparent);padding:8px 0}
+#change-list li span{display:block;color:var(--color-text-secondary,GrayText)}
 </style></head><body><main>
 <div class="head"><h1>Mod Controls</h1><button id="refresh" disabled>Refresh</button></div>
 <p id="notice" role="status" aria-live="polite">Connecting to Chat Sync…</p>
@@ -24,6 +27,14 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 <p class="hint">Choose or paste an emoji to show the chat’s origin in Desktop Mods 0.10 or later. Clear it to hide the label. Other desktops receive changes on sync.</p></details>
 <details id="sharing" hidden><summary>Sharing options and local-only rules</summary><div id="options"></div><p id="rules"></p></details>
 <div class="actions"><button id="run" disabled>Sync now</button><button id="pause" disabled>Pause sync</button></div></section>
+<section id="sidebar-review" hidden><h2>Sidebar changes</h2>
+<p id="sidebar-status"></p>
+<div class="actions"><button id="preview-sidebar" disabled>Preview changes</button>
+<button id="undo-sidebar" hidden disabled>Undo last batch</button></div>
+<p id="undo-hint" class="hint" hidden></p>
+<div id="preview-result" hidden><p id="change-count" role="status"></p><ul id="change-list"></ul>
+<p id="review-hint" class="hint"></p><div class="actions"><button id="more-changes" hidden>Show more changes</button>
+<button id="apply-sidebar" hidden disabled>Apply reviewed changes</button></div></div></section>
 <section id="integrity" hidden><h2>Sync folder health</h2>
 <p id="report">Check that this desktop’s sync folder has a complete copy of each currently shared chat revision.</p>
 <p id="repair-hint" class="hint"></p>
@@ -36,6 +47,7 @@ const features = {wideChat:'Wider chats',petDock:'Pet in the chat margin',petMot
 const options = {colours:['Colours and saved swatches','set_colour_sync'],settings:['Appearance and chat preferences','set_settings_sync'],sidebar:['Projects and sections','set_sidebar_sync'],order:['Pins and order','set_pin_order_sync']};
 const pending = new Map();
 let seq = 0, state, working = true;
+let preview=null, visibleChanges=25;
 function send(message){parent.postMessage({jsonrpc:'2.0',...message},'*')}
 function rpc(method,params){
   return new Promise((resolve,reject)=>{
@@ -77,10 +89,61 @@ function field(label,value){
   const dt=document.createElement('dt'),dd=document.createElement('dd');
   dt.textContent=label;dd.textContent=value;el('health').append(dt,dd);
 }
+function describeChange({action,id,before,after},names){
+  const name=(kind,value)=>names[kind+'/'+value]||value;
+  if(action==='lists_reordered'){
+    const [title,kind]={projects:['Project order','project'],sections:['Section order','section'],pins:['Pinned chat order','chat']}[id];
+    const list=ids=>(ids||[]).map(value=>name(kind,value)).join(' · ')||'None';
+    return [title,list(before)+' → '+list(after)];
+  }
+  if(action==='pins_changed')return [after?'Pin chat':'Unpin chat',name('chat',id)];
+  if(action==='project_moves'||action==='section_moves'){
+    const kind=action==='project_moves'?'project':'section';
+    return [name('chat',id),(kind==='project'?'Project':'Section')+' · '+(name(kind,before)||'None')+' → '+(name(kind,after)||'None')];
+  }
+  const [kind,operation]=action.split('_');
+  return [operation==='created'?'Create '+kind:'Rename '+kind,operation==='created'?after:before+' → '+after];
+}
+function renderSidebar(s){
+  const enabled=s.configured&&s.options.sidebar, info=s.sidebarReview;
+  el('sidebar-review').hidden=!s.configured||!(enabled||info.undoBatch);
+  if(!enabled)preview=null;
+  const undoQueued=info.queued==='undo';
+  el('sidebar-status').textContent=undoQueued?'Undo is queued for when you fully quit the desktop app.':
+    info.queued==='apply'?'Layout changes are queued for when you fully quit the desktop app.':
+    !enabled?'Sidebar sync is off on this desktop.':
+    info.required?'Incoming sidebar changes are ready to review.':'Review incoming project, section, pin and order changes.';
+  el('preview-sidebar').hidden=!enabled;
+  el('preview-sidebar').disabled=working||!enabled||!s.available||undoQueued;
+  el('undo-sidebar').hidden=el('undo-hint').hidden=!info.undoBatch||undoQueued;
+  el('undo-sidebar').disabled=working;
+  el('undo-hint').textContent=(info.lastApplied?'Last batch · '+new Date(info.lastApplied*1000).toLocaleString()+'. ':'')+
+    'Undo restores the previous sidebar and turns off project, section and order sync on this desktop.';
+  el('preview-result').hidden=!preview;
+  el('change-list').replaceChildren();
+  if(!preview)return;
+  const changes=preview.changes,n=changes.length;
+  el('change-count').textContent=n===0?'No incoming changes to apply.':n+' incoming '+(n===1?'change':'changes');
+  for(const change of changes.slice(0,visibleChanges)){
+    const [title,detail]=describeChange(change,preview.names||{});
+    const li=document.createElement('li'),strong=document.createElement('strong'),span=document.createElement('span');
+    strong.textContent=title;span.textContent=detail;li.append(strong,span);el('change-list').append(li);
+  }
+  el('review-hint').textContent=[
+    n?'After the first approval, later syncs can apply sidebar changes automatically.':'',
+    n&&s.paused?'Resume sync before applying changes.':'',
+    preview.sections_need_sign_in?'Sign in to review custom sections.':'',
+    preview.deferred_devices?.length?'Some device records are unavailable. Check again after your folder finishes syncing.':''
+  ].filter(Boolean).join(' ');
+  el('more-changes').hidden=visibleChanges>=n;
+  el('apply-sidebar').hidden=n===0;
+  el('apply-sidebar').disabled=working||!s.available||s.paused||undoQueued;
+}
 function render(){
   el('refresh').disabled=working;
   if(!state) return;
   const s=state,h=s.health,r=s.receipts;
+  renderSidebar(s);
   el('overview').textContent=!s.configured?'Disconnected':s.paused?'Sync paused':!s.available?'Folder unavailable':s.automatic?'Automatic sync on':'Manual sync';
   el('setup').hidden=s.configured;el('health').replaceChildren();
   if(s.configured){
@@ -136,10 +199,10 @@ function render(){
 }
 async function act(tool,args={},message=''){
   if(working) return;
-  working=true;render();el('notice').textContent=({mod_controls_sync:'Syncing…',check_sync_folder:'Checking shared chat revisions…',repair_sync_folder:'Verifying and restoring matching blocks…'})[tool]||'';
+  working=true;preview=null;render();el('notice').textContent=({mod_controls_sync:'Syncing…',check_sync_folder:'Checking shared chat revisions…',repair_sync_folder:'Verifying and restoring matching blocks…',preview_sidebar_sync:'Reading sidebar changes…',apply_sidebar_preview:'Applying reviewed changes…',undo_sidebar_batch:'Undoing the last batch…'})[tool]||'';
   try {
-    if(tool) await call(tool,args);
-    state=await call('mod_controls_status');el('notice').textContent=message;
+    const result=tool?await call(tool,args):null;
+    state=await call('mod_controls_status');el('notice').textContent=typeof message==='function'?message(result):message;
   } catch(e){
     el('notice').textContent=e.message;
     if(tool) try{state=await call('mod_controls_status')}catch{}
@@ -159,9 +222,22 @@ el('device-form').onkeydown=event=>{
 };
 el('check').onclick=()=>act('check_sync_folder');
 el('repair').onclick=()=>act('repair_sync_folder');
+el('preview-sidebar').onclick=()=>act('preview_sidebar_sync',{},result=>{
+  if(!result.undo_on_quit){preview=result;visibleChanges=25}
+  return '';
+});
+el('more-changes').onclick=()=>{visibleChanges+=25;renderSidebar(state)};
+el('apply-sidebar').onclick=()=>act('apply_sidebar_preview',{batch:preview.id},result=>{
+  if(result.undo_on_quit)return 'An undo is already queued.';
+  return [result.desktop_refresh_on_quit?'Fully quit and reopen the app to see the updated layout.':'Reviewed changes applied.',
+    result.pending_chats?'Some chats are still waiting to sync.':'',
+    result.deferred_devices?.length?'Some device records are still unavailable.':''].filter(Boolean).join(' ');
+});
+el('undo-sidebar').onclick=()=>act('undo_sidebar_batch',{batch:state.sidebarReview.undoBatch},result=>
+  result.undo_on_quit?'Fully quit the app to finish undoing the last sidebar batch.':'Sidebar restored. Project, section and order sync are off on this desktop.');
 async function connect(){
   try{
-    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.9.2'},appCapabilities:{},protocolVersion:'2026-01-26'});
+    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.10.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
     theme(host.hostContext);send({method:'ui/notifications/initialized',params:{}});
     new ResizeObserver(()=>send({method:'ui/notifications/size-changed',params:{height:document.querySelector('main').offsetHeight}})).observe(document.querySelector('main'));
     working=false;await act();

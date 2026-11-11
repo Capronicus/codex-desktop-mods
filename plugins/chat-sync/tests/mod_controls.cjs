@@ -10,8 +10,15 @@ const {chromium} = require('/usr/lib/chatgpt/resources/cua_node/lib/node_modules
 async function run() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mod-controls-ui-'));
   const home = path.join(root, 'profile');
-  const child = spawn('python3', [path.join(__dirname, '..', 'server.py')], {
-    env: {...process.env, CODEX_HOME:home}, stdio:['pipe', 'pipe', 'inherit']
+  // Simulate an open desktop without starting a worker that waits on the user's app.
+  const fixture = [
+    'import runpy, desktop_layout',
+    'desktop_layout.desktop_running = lambda: True',
+    'desktop_layout.start_worker = lambda home: None',
+    'runpy.run_path("server.py", run_name="__main__")'
+  ].join('\n');
+  const child = spawn('python3', ['-c', fixture], {
+    cwd:path.join(__dirname,'..'), env: {...process.env, CODEX_HOME:home}, stdio:['pipe', 'pipe', 'inherit']
   });
   const lines = readline.createInterface({input:child.stdout});
   const waiting = new Map();
@@ -49,6 +56,7 @@ async function run() {
     }, html);
     const panel = page.frameLocator('iframe');
     await panel.getByText('Disconnected', {exact:true}).waitFor();
+    assert.ok(await panel.getByRole('heading',{name:'Sidebar changes'}).isHidden());
     assert.ok(await panel.getByText('Sync now').isDisabled());
     const dock = panel.getByRole('switch', {name:'Pet in the chat margin'});
     const motion = panel.getByRole('switch', {name:'Pet runs while scrolling'});
@@ -96,10 +104,58 @@ async function run() {
     await panel.getByRole('button',{name:'Repair from this desktop'}).click();
     await panel.getByText(/Blocks restored: 1/).waitFor();
     assert.equal(require('node:zlib').gunzipSync(await fs.readFile(block)).toString(),transcript);
+    const project=require('node:crypto').randomUUID(), peer=require('node:crypto').randomUUID();
+    const sqlite=new DatabaseSync(path.join(home,'state_5.sqlite'));
+    sqlite.exec('CREATE TABLE projects(id,name,metadata); CREATE TABLE thread_sections(id,name); ALTER TABLE threads ADD project_id; ALTER TABLE threads ADD thread_section_id');
+    sqlite.prepare('INSERT INTO projects VALUES (?,?,?)').run(project,'From Work','{}');
+    sqlite.close();
+    const layoutFile=path.join(home,'.codex-global-state.json');
+    const layout=JSON.stringify({'local-projects':{[project]:{id:project,name:'At Home',rootPaths:[]}}});
+    await fs.writeFile(layoutFile,layout);
+    const shared=path.join(folder,'codex-chat-sync-v1','sidebar-v1');
+    await fs.mkdir(shared);
+    const writeHead=name=>fs.writeFile(path.join(shared,peer+'.json'),JSON.stringify({v:1,rows:{['project/'+project]:[3,peer,name]}}));
+    await panel.getByText('Sharing options and local-only rules').click();
+    await panel.getByRole('switch',{name:'Projects and sections'}).check();
+    const review=panel.getByRole('button',{name:'Preview changes'});
+    const apply=panel.getByRole('button',{name:'Apply reviewed changes'});
+    await writeHead('At Home');
+    await review.click();
+    await panel.getByText('No incoming changes to apply.').waitFor();
+    assert.ok(await apply.isHidden());
+    await writeHead('First draft');
+    await review.click();
+    await panel.getByText('At Home → First draft').waitFor();
+    assert.deepEqual(await fs.readdir(shared),[peer+'.json']);
+    await writeHead('From Work');
+    await apply.click();
+    await panel.getByText(/preview changed/).waitFor();
+    assert.ok(await apply.isHidden());
+    assert.equal(await fs.readFile(layoutFile,'utf8'),layout);
+    await review.click();
+    await panel.getByText('At Home → From Work').waitFor();
+    await apply.click();
+    await panel.getByText('Layout changes are queued for when you fully quit the desktop app.').waitFor();
+    const queue=path.join(home,'chat-sync','sidebar-layout-pending.json');
+    assert.equal(JSON.parse(await fs.readFile(queue)).changes['project/'+project][1],'From Work');
+    const undo=panel.getByRole('button',{name:'Undo last batch'});
+    const journal=path.join(home,'chat-sync','sidebar-undo.json');
+    const latest=JSON.parse(await fs.readFile(journal));
+    await fs.writeFile(journal,JSON.stringify({...latest,id:'f'.repeat(64)}));
+    await undo.click();
+    await panel.getByText(/newer sidebar batch/).waitFor();
+    assert.ok(JSON.parse(await fs.readFile(queue)).changes);
+    await undo.click();
+    await panel.getByText('Undo is queued for when you fully quit the desktop app.').waitFor();
+    assert.equal(JSON.parse(await fs.readFile(queue)).batch_id,'f'.repeat(64));
+    await panel.getByRole('switch',{name:'Projects and sections'}).uncheck();
+    await panel.getByRole('button',{name:'Pause sync'}).click();
+    await panel.getByText('Sync paused', {exact:true}).waitFor();
+    assert.equal(JSON.parse(await fs.readFile(queue)).undo,true);
     await page.setViewportSize({width:360,height:740});
     const frame = page.frames().find(frame => frame.parentFrame());
     assert.ok(await frame.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    console.log('Passed disconnected, preference persistence, pause, resume, sync failure, check, repair and narrow layout in Chromium.');
+    console.log('Passed sync and appearance controls, preview, stale apply and undo, queued changes and narrow layout in Chromium.');
   } finally {
     child.stdin.end();
     if (browser) await browser.close();

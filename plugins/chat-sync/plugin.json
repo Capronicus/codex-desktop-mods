@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "chat-sync",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "description": "Sync local Codex chat histories across desktop profiles.",
   "extensions": {
     "com.openai": {

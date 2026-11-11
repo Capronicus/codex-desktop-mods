@@ -13,6 +13,8 @@ The installed plugin folder contains `sync.py`. Run `python3 /path/to/sync.py st
 
 ## Mod Controls
 
+With **Projects and sections** enabled, open **Mod Controls → Sidebar changes → Preview changes**. Review the affected projects, sections, chats and pins, then choose **Apply reviewed changes**. If another desktop changes the batch, preview again. After the first approval, later syncs can apply incoming sidebar changes automatically. **Undo last batch** restores the previous sidebar on this desktop and turns off sidebar and order sync here. The panel shows when changes will finish on quit.
+
 In **Device name and emoji**, choose a name and an optional emoji for this desktop. The CLI equivalent is `python3 sync.py name Work --emoji "💼"`. Clear the emoji to hide the origin label. After both desktops sync, Desktop Mods 0.10.0 shows it beside the chat title and above the composer. **Started on** identifies a recorded origin. **First seen on** identifies the first desktop to share an older chat. Ambiguous origins get no badge. Local file paths still refer to their original computer.
 
 **Mod Controls** opens from the desktop sidebar or by asking Chat Sync to open it. It shows the private folder, last attempt, last full success and delivery receipts. **Pause sync** suspends automatic and manual transfers on this computer. **Resume sync** restores the previous schedule. The CLI also accepts `pause` and `resume`. Disconnecting retains local-only rules for future connections and restores the same device identity when you reconnect the same folder.

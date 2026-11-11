@@ -294,16 +294,22 @@ def apply_pending(home):
     plan = sync.read_json(path)
     if not plan:
         return True
-    if cfg.get("paused"):
-        return False
-    if not cfg.get("sidebar") or cfg["device"] != plan["device"]:
+    undo = plan.get("undo", False)
+    if cfg.get("device") != plan["device"] or not (undo or cfg.get("sidebar")):
         path.unlink(missing_ok=True)
         return True
+    if cfg.get("paused") and not undo:
+        return False
     if desktop_running():
         return False
-    if plan.get("undo"):
+    if undo:
         import batches
 
+        if plan.get("account") != Layout(home).account:
+            return False
+        if plan.get("batch_id") and plan["batch_id"] != sync.read_json(directory / batches.JOURNAL, {}).get("id"):
+            path.unlink(missing_ok=True)
+            return True
         batches.undo_locked(home, cfg)
         return True
     layout = Layout(home)
@@ -384,7 +390,8 @@ def finish_on_exit(home):
     with sync.lock(directory / "sidebar-exit.lock"):
         while (directory / QUEUE).is_file():
             cfg = sync.read_json(directory / "config.json", {})
-            if not cfg.get("sidebar") or cfg.get("paused"):
+            plan = sync.read_json(directory / QUEUE, {})
+            if not plan.get("undo") and (not cfg.get("sidebar") or cfg.get("paused")):
                 return
             pid = desktop_pid()
             if pid is not None:

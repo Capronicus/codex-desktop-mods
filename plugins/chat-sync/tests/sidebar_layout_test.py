@@ -25,6 +25,30 @@ def ident():
 
 
 class DesktopSidebar(unittest.TestCase):
+    def test_queued_undo_is_local_and_bound_to_the_selected_batch(self):
+        with TemporaryDirectory() as temp:
+            home = Path(temp)
+            directory = home / "chat-sync"
+            device, a, b = ident(), ident(), ident()
+            state = home / ".codex-global-state.json"
+            config = directory / "config.json"
+            queue = directory / desktop_layout.QUEUE
+            journal = directory / "sidebar-undo.json"
+            sync.atomic(config, sync.encode({"device": device, "paused": True, "sidebar": False}))
+            sync.atomic(state, sync.encode({"local-projects": {}, "project-order": [b, a]}))
+            sync.atomic(journal, sync.encode({"device": device, "id": "latest", "native": {},
+                                              "desktop": [[["project-order"], [a, b], [b, a]]]}))
+            with (patch.object(desktop_layout, "desktop_pid", return_value=None),
+                  patch.object(desktop_layout, "desktop_running", return_value=False)):
+                for batch, expected in [("outdated", [b, a]), ("latest", [a, b])]:
+                    sync.atomic(queue, sync.encode({"device": device, "account": "", "undo": True, "batch_id": batch}))
+                    desktop_layout.finish_on_exit(home)
+                    self.assertFalse(queue.exists())
+                    self.assertEqual(sync.read_json(state)["project-order"], expected)
+            self.assertFalse(journal.exists())
+            self.assertTrue(sync.read_json(config)["paused"])
+            self.assertFalse(sync.read_json(config)["sidebar"])
+
     def test_queued_reorder_respects_intervening_edits(self):
         with TemporaryDirectory() as temp:
             home = Path(temp)

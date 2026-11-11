@@ -1,6 +1,7 @@
 """Review received sidebar changes and undo the last applied local batch."""
 
 import copy
+import time
 
 import sync
 
@@ -23,6 +24,35 @@ def summarize(changes):
         totals[action] = totals.get(action, 0) + 1
         details.append({"action": action, "id": ident, "before": old, "after": new})
     return {"id": sync.digest(sync.encode(changes)), "counts": totals, "changes": details}
+
+
+def preview_names(changes, rows, current, index):
+    """Resolve only the objects the local review actually displays."""
+    names = {}
+
+    def add(kind, ident):
+        if not ident:
+            return
+        key = kind + "/" + ident
+        if kind == "chat":
+            name = index.get(ident, {}).get("name")
+        else:
+            name = rows[key][2] if key in rows else current.get(key)
+        if name:
+            names[key] = name
+
+    for key, (before, after) in changes.items():
+        kind, ident = key.split("/")
+        if kind == "order":
+            target = {"projects": "project", "sections": "section", "pins": "chat"}[ident]
+            for item in (before or []) + (after or []):
+                add(target, item)
+        elif kind.startswith("chat-"):
+            add("chat", ident)
+            if kind in ("chat-project", "chat-section"):
+                add(kind[5:], before)
+                add(kind[5:], after)
+    return names
 
 
 def begin(home, device, review, changes, native, pinned, rows):
@@ -52,6 +82,7 @@ def begin(home, device, review, changes, native, pinned, rows):
         original = undo["native"].get(key, [native.get(key)])[0]
         undo["native"][key] = [original, after]
     undo["id"] = review["id"]
+    undo["updated_at"] = time.time()
     sync.atomic(p, sync.encode(undo))
     return review["id"]
 
@@ -201,7 +232,7 @@ def undo_locked(home, cfg):
     return {"undone": doc["id"], "sidebar": False}
 
 
-def undo():
+def undo(batch=None):
     import desktop_layout
     import projects
 
@@ -210,6 +241,8 @@ def undo():
         doc = sync.read_json(sync.STATE / JOURNAL, {})
         if doc.get("device") != cfg["device"]:
             raise ValueError("There is no sidebar batch to undo on this device.")
+        if batch is not None and batch != doc.get("id"):
+            raise ValueError("A newer sidebar batch is available. Refresh before undoing it.")
         if desktop_layout.desktop_running():
             sync.atomic(
                 sync.STATE / desktop_layout.QUEUE,
@@ -217,6 +250,7 @@ def undo():
                     {
                         "device": cfg["device"],
                         "undo": True,
+                        "batch_id": doc["id"],
                         "account": desktop_layout.Layout(sync.HOME).account,
                     }
                 ),
@@ -236,6 +270,8 @@ def review(action="preview", batch=""):
             sync.require_active(cfg)
         if not cfg.get("sidebar"):
             raise ValueError("Enable sidebar sync on this computer first.")
+        if not vault.is_dir():
+            raise ValueError("Sync folder unavailable. Check the mount or desktop sync client.")
         index = sync.catalog()
         sharing = projects.Sharing(cfg, vault, index, sync.HOME)
         known = sync.read_json(sync.STATE / ("state-" + cfg["device"] + ".json"), {})
@@ -251,4 +287,5 @@ def review(action="preview", batch=""):
             sharing=sharing,
             action=action,
             approval=batch,
+            chat_index=index,
         )
