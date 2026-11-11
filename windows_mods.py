@@ -8,7 +8,9 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
+import stat
 import struct
 import subprocess
 import sys
@@ -100,15 +102,32 @@ def revision(app, version, tools):
     return digest.hexdigest()
 
 
+def cache_directory(path):
+    info = path.lstat()
+    return (stat.S_ISDIR(info.st_mode)
+            and not getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def retire(path):
+    # A previous cleanup may still have a retired copy of the same revision.
+    return path.rename(path.with_name('retired-' + secrets.token_hex(32)))
+
+
 def runtime(app, version, root):
     key = revision(app, version, tool_version())
     cache = root / 'runtimes'
     dest = cache / key
-    if (dest / '.complete').is_file() and (dest / EXE).is_file() and (dest / ASAR).is_file():
-        return dest
     cache.mkdir(parents=True, exist_ok=True)
-    if dest.exists():
-        raise ValueError('The cached runtime is incomplete. Remove and reapply the mods.')
+    if not cache_directory(cache):
+        raise ValueError('Expected an ordinary runtime cache directory.')
+    if os.path.lexists(dest):
+        if not cache_directory(dest):
+            raise ValueError('The runtime cache path is not an ordinary directory.')
+        if (dest / '.complete').is_file() and (dest / EXE).is_file() and (dest / ASAR).is_file():
+            return dest
+        if running_copy(dest):
+            raise ValueError('Quit the modded desktop app, including its tray icon, then retry to rebuild its cached copy.')
+        retire(dest)
     with tempfile.TemporaryDirectory(dir=cache) as tmp:
         stage = Path(tmp) / 'app'
 
@@ -193,7 +212,7 @@ def install_tools(root):
     return dest
 
 
-def running_copy(root):
+def running_copy(directory):
     # Do not remove even a helper DLL while the old runtime is in use.
     answer = powershell("""
         $prefix=$env:MOD_CACHE+'\x5c'
@@ -204,7 +223,7 @@ def running_copy(root):
           }
           if (!$p.ExecutablePath -and $p.Name -in @('ChatGPT.exe','Codex.exe')) { Write-Output 'busy'; break }
         }
-    """, MOD_CACHE=root / 'runtimes')
+    """, MOD_CACHE=directory)
     return answer == 'busy'
 
 
@@ -212,25 +231,27 @@ def prune(root, keep=None):
     directory = root / 'runtimes'
     if not directory.is_dir():
         return True
-    old = [p for p in directory.iterdir() if REV.fullmatch(p.name) and p != keep and (p / '.complete').is_file()]
-    if old and running_copy(root):
+    if not cache_directory(directory):
+        raise ValueError('Expected an ordinary runtime cache directory.')
+    old = [p for p in directory.iterdir() if REV.fullmatch(p.name) and p != keep and cache_directory(p)]
+    retired = [p for p in directory.glob('retired-*') if REV.fullmatch(p.name[8:]) and cache_directory(p)]
+    if (old or retired) and running_copy(directory):
         return False
     done = True
     for path in old:
         try:
-            path.rename(directory / ('retired-' + path.name))
+            retired.append(retire(path))
         except OSError as exc:
             if getattr(exc, 'winerror', None) not in (5, 32, 33, 183):
                 raise
             done = False
-    for path in directory.glob('retired-*'):
-        if REV.fullmatch(path.name[8:]):
-            try:
-                shutil.rmtree(path)
-            except OSError as exc:
-                if getattr(exc, 'winerror', None) not in (5, 32, 33):
-                    raise
-                done = False
+    for path in retired:
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            if getattr(exc, 'winerror', None) not in (5, 32, 33):
+                raise
+            done = False
     return done
 
 

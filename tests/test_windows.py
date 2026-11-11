@@ -64,6 +64,29 @@ class WindowsModsTests(unittest.TestCase):
         self.assertFalse(list(self.cache.glob('runtimes/*')))
         self.assertEqual(wrong,self.executable.read_bytes())
 
+    def test_incomplete_runtime_recovers_after_quit(self):
+        key = mods.revision(self.app, '1', mods.tool_version())
+        dest = self.cache / 'runtimes' / key
+        dest.mkdir(parents=True)
+        (dest / mods.EXE).write_bytes(b'partial')
+        with patch.object(mods, 'running_copy', return_value=True) as busy:
+            with self.assertRaisesRegex(ValueError, 'Quit'):
+                mods.runtime(self.app, '1', self.cache)
+            busy.assert_called_once_with(dest)
+            self.assertFalse(mods.prune(self.cache))
+        self.assertEqual((dest / mods.EXE).read_bytes(), b'partial')
+        unrelated = dest.parent / 'user-folder'
+        unrelated.mkdir()
+        with patch.object(mods, 'running_copy', return_value=False), \
+             patch.object(mods.patcher, 'patch_archive', side_effect=lambda target, **kw: archive(target, 'rebuilt')):
+            self.assertEqual(mods.runtime(self.app, '1', self.cache), dest)
+            self.assertEqual((dest / '.complete').read_text(), key)
+            self.assertTrue(mods.prune(self.cache, dest))
+            self.assertEqual(set(dest.parent.iterdir()), {dest, unrelated})
+            (dest / '.complete').unlink()
+            self.assertTrue(mods.prune(self.cache))
+            self.assertEqual(set(dest.parent.iterdir()), {unrelated})
+
     @unittest.skipUnless(sys.platform == 'win32', 'Uses the native Windows Shell')
     def test_windows_shortcut_and_removal(self):
         link = self.root / 'Start menu' / 'ChatGPT (Desktop Mods).lnk'

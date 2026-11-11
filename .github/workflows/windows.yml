@@ -2,7 +2,7 @@ name: Windows desktop mods
 on:
   workflow_dispatch:
   push:
-    branches: [main, windows-port, codex/sidebar-palette, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/pet-controls]
+    branches: [main, windows-port, codex/sidebar-palette, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/pet-controls, codex/recover-desktop-metadata]
 permissions:
   contents: read
 jobs:
@@ -11,6 +11,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read plain and compressed chat histories
+        run: node tests/chat-details.cjs
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
