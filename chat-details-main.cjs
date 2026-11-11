@@ -37,8 +37,10 @@
     dirs.push(path.join(home, 'archived_sessions'));
     for (const dir of dirs) {
       const names = await fs.readdir(dir, {withFileTypes:true}).catch(() => []);
-      const f = names.find(n => n.isFile() && n.name.startsWith('rollout-') && n.name.endsWith('-' + id + '.jsonl'));
-      if (f) return path.join(dir, f.name);
+      for (const ext of ['.jsonl', '.jsonl.zst']) {
+        const f = names.find(n => n.isFile() && n.name.startsWith('rollout-') && n.name.endsWith('-' + id + ext));
+        if (f) return path.join(dir, f.name);
+      }
     }
     // Older IDs do not encode a date. Use the existing thread catalogue.
     let db;
@@ -49,8 +51,25 @@
     } catch { return null; } finally { db?.close(); }
   }
 
-  function newState() {
-    return {turns:new Map(), current:null, total:null, pos:0, identity:null, file:null, busy:null};
+  async function historyFile(id, cached) {
+    let file = cached && await fs.realpath(cached).catch(() => null);
+    if (!file) {
+      const candidate = await findFile(id);
+      if (!candidate) return null;
+      // The catalogue can still name the plain transcript after compression.
+      file = await fs.realpath(candidate).catch(error => {
+        if (error.code !== 'ENOENT' || !candidate.endsWith('.jsonl')) throw error;
+        return fs.realpath(candidate + '.zst');
+      });
+    }
+    const root = await fs.realpath(home);
+    const dir = path.relative(root,file).split(path.sep)[0];
+    if (!['sessions','archived_sessions'].includes(dir) || !path.basename(file).replace(/\.zst$/, '').endsWith('-'+id+'.jsonl')) return null;
+    return file;
+  }
+
+  function newTranscript() {
+    return {turns:new Map(), current:null, total:null, pos:0, partial:Buffer.alloc(0), skipping:false};
   }
   function count(n) { return Number.isSafeInteger(n) && n >= 0 ? n : null; }
   function record(s, line) {
@@ -100,49 +119,58 @@
     }
   }
 
-  async function update(s, id) {
-    const candidate = s.file || await findFile(id);
-    if (!candidate) return;
-    const file = await fs.realpath(candidate);
-    const root = await fs.realpath(home);
-    const rel = path.relative(root,file).split(path.sep);
-    if (!['sessions','archived_sessions'].includes(rel[0]) || !path.basename(file).endsWith('-'+id+'.jsonl')) return;
-    const handle = await fs.open(file, 'r');
-    try {
-      const stat = await handle.stat();
-      if (!stat.isFile()) return;
-      const identity = stat.dev + ':' + stat.ino;
-      if (s.identity !== identity || stat.size < s.pos) {
-        s.turns.clear(); s.current=null; s.total=null; s.pos=0; s.partial=Buffer.alloc(0); s.skipping=false;
-      }
-      s.identity=identity; s.file=file;
-      if (stat.size===s.pos) return;
-      const stream = handle.createReadStream({start:s.pos,end:stat.size-1,autoClose:false});
-      for await (const chunk of stream) {
-        let start=0;
-        while (start<chunk.length) {
-          const nl=chunk.indexOf(10,start), end=nl<0?chunk.length:nl;
-          if (!s.skipping) {
-            const part=chunk.subarray(start,end);
-            if (s.partial.length+part.length>maxLine) { s.skipping=true; s.partial=Buffer.alloc(0); }
-            else if (nl<0) s.partial=Buffer.concat([s.partial,part]);
-            else record(s, s.partial.length?Buffer.concat([s.partial,part]).toString():part.toString());
-          }
-          if (nl<0) break;
-          s.partial=Buffer.alloc(0);s.skipping=false;start=nl+1;
+  async function readLines(s, stream) {
+    for await (const chunk of stream) {
+      let start=0;
+      while (start<chunk.length) {
+        const nl=chunk.indexOf(10,start), end=nl<0?chunk.length:nl;
+        if (!s.skipping) {
+          const part=chunk.subarray(start,end);
+          if (s.partial.length+part.length>maxLine) { s.skipping=true; s.partial=Buffer.alloc(0); }
+          else if (nl<0) s.partial=Buffer.concat([s.partial,part]);
+          else record(s, s.partial.length?Buffer.concat([s.partial,part]).toString():part.toString());
         }
-        s.pos+=chunk.length;
+        if (nl<0) break;
+        s.partial=Buffer.alloc(0);s.skipping=false;start=nl+1;
       }
-    } finally { await handle.close(); }
+      s.pos+=chunk.length;
+    }
+  }
+
+  function stamp(stat) {
+    return [stat.size, stat.mtimeNs, stat.ctimeNs].join(':');
+  }
+
+  async function update(cacheEntry, id) {
+    const file = await historyFile(id, cacheEntry.file);
+    if (!file) { cacheEntry.data=null; cacheEntry.file=null; return; }
+    const handle = await fs.open(file, 'r');
+    let raw;
+    try {
+      const stat = await handle.stat({bigint:true});
+      if (!stat.isFile()) throw Error('Expected a transcript file');
+      const identity = stat.dev + ':' + stat.ino;
+      const version = stamp(stat);
+      const sameFile = cacheEntry.data && cacheEntry.file === file && cacheEntry.identity === identity;
+      if (sameFile && cacheEntry.version === version) return;
+      const compressed = file.endsWith('.zst');
+      const size = Number(stat.size);
+      const data = sameFile && !compressed && size > cacheEntry.data.pos ? cacheEntry.data : newTranscript();
+      if (size) {
+        raw = handle.createReadStream({start:data.pos, end:size-1, autoClose:false});
+        if (compressed) {
+          const {pipeline} = require('node:stream/promises');
+          await pipeline(raw, require('node:zlib').createZstdDecompress(), chunks => readLines(data, chunks));
+          if (stamp(await handle.stat({bigint:true})) !== version) throw Error('Archive changed during read');
+        } else await readLines(data, raw);
+      }
+      Object.assign(cacheEntry, {file, identity, version, data});
+    } finally { raw?.destroy(); await handle.close(); }
   }
 
   async function readForkParent(id) {
-    const candidate = await findFile(id);
-    if (!candidate) return undefined;
-    const file = await fs.realpath(candidate).catch(() => fs.realpath(candidate + '.zst'));
-    const root = await fs.realpath(home);
-    const dir = path.relative(root,file).split(path.sep)[0];
-    if (!['sessions','archived_sessions'].includes(dir) || !file.replace(/\.zst$/, '').endsWith('-'+id+'.jsonl')) return undefined;
+    const file = await historyFile(id);
+    if (!file) return undefined;
     const raw = require('node:fs').createReadStream(file);
     const stream = file.endsWith('.zst') ? require('node:zlib').createZstdDecompress() : raw;
     if (stream !== raw) { raw.on('error',error => stream.destroy(error)); raw.pipe(stream); }
@@ -351,14 +379,14 @@
       || !turns.every(t=>typeof t==='string' && idPattern.test(t))) return {};
     let s=cache.get(id);
     if (!s) {
-      s=newState();cache.set(id,s);
+      s={};cache.set(id,s);
       if(cache.size>8) for(const [key,v] of cache) if(key!==id && !v.busy){cache.delete(key);break;}
     } else {cache.delete(id);cache.set(id,s);}
-    if (!s.busy) s.busy=update(s,id).catch(()=>{s.file=null;}).finally(()=>{s.busy=null;});
+    if (!s.busy) s.busy=update(s,id).catch(()=>{s.file=null; s.data=null;}).finally(()=>{s.busy=null;});
     await s.busy;
     const result={};
     for(const key of turns) {
-      const t=s.turns.get(key);
+      const t=s.data?.turns.get(key);
       if(t) result[key]={start:t.start,reply:t.reply??t.end,end:t.end,tokens:t.unknownDelta?null:t.tokens,total:t.total};
     }
     return result;

@@ -83,7 +83,7 @@ Right-click a project, chat or custom section heading and choose **Project colou
 
 Messages show their local date and time when the chat history provides a timestamp. On a completed Codex turn, **225 tokens this turn · 340 chat total** means the model used 225 input and output tokens across the calls for that turn, bringing the recorded conversation total to 340. Reopening the chat shows the counts through each reply. Regular ChatGPT conversations show timestamps when available.
 
-The mod reads usage from the existing local Codex session history. Its desktop bridge returns numeric metadata for the requested turns. Missing usage stays blank.
+The mod reads usage from both plain and compressed local Codex histories. Reopening a compressed chat shows its recorded timestamps and token counts. Missing usage stays blank.
 
 ![A test chat showing two reply timestamps and the running token total](images/chat-details.png)
 

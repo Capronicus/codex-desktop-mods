@@ -24,8 +24,12 @@ def main():
     print('Installed package', pkg[1], flush=True)
     if mods.shortcut().exists():
         raise RuntimeError('Expected a clean runner.')
+    incomplete = mods.data_dir() / 'runtimes' / mods.revision(*pkg, mods.tool_version())
+    incomplete.mkdir(parents=True)
+    (incomplete / 'partial-install').touch()
     print(mods.apply(), flush=True)
     assert mods.status()['patch_state'] == 'ready'
+    assert not (incomplete / 'partial-install').exists()
     runtime = mods.runtime(*pkg, mods.data_dir())
     exe = runtime / mods.EXE
     with (runtime / mods.ASAR).open('rb') as file, mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as archive:
@@ -66,8 +70,12 @@ def main():
                 ('token_usage_record',{'turn_id':turn,'turn_token_usage':{'total_tokens':25},
                                        'thread_token_usage':{'total_tokens':125}}),
                 ('event_msg',{'type':'task_complete','turn_id':turn})]
-        (archive/('rollout-legacy-'+thread+'.jsonl')).write_text(''.join(json.dumps({
-            'type':kind,'timestamp':'2026-11-09T08:00:00Z','payload':payload})+'\n' for kind,payload in rows))
+        transcript = ''.join(json.dumps({
+            'type':kind,'timestamp':'2026-11-09T08:00:00Z','payload':payload})+'\n' for kind,payload in rows)
+        compressed = subprocess.check_output(
+            ['node', '-e', "process.stdout.write(require('node:zlib').zstdCompressSync(require('node:fs').readFileSync(0)))"],
+            input=transcript.encode('utf-8'))
+        (archive/('rollout-legacy-'+thread+'.jsonl.zst')).write_bytes(compressed)
         host_env = {**os.environ, 'CODEX_HOME':str(home), 'CODEX_ELECTRON_USER_DATA_PATH':str(profile)}
         cli = pkg[0] / 'resources' / 'codex.exe'
         repo = Path(__file__).resolve().parents[1]
