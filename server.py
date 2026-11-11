@@ -1,9 +1,13 @@
 """Dependency-free MCP stdio server. Each input and output line is one JSON-RPC message."""
 import json
+from http.client import HTTPException
+import sqlite3
 import struct
 import subprocess
 import sys
 from pathlib import Path
+
+import activation
 
 ROOT = Path(__file__).resolve().parent
 MANIFEST = json.loads((ROOT / 'plugin.json').read_text(encoding='utf-8'))
@@ -27,7 +31,7 @@ TOOLS = [
     tool('remove_desktop_mods', 'Remove desktop mods',
          'Disable the patched launcher and remove unused patch files. Keeps profile preferences.',
          destructive=True),
-]
+] + activation.TOOLS
 
 
 class RpcError(Exception):
@@ -51,9 +55,16 @@ def dispatch(method, params):
     name = params.get('name')
     if name not in [entry['name'] for entry in TOOLS]:
         raise RpcError(-32602, 'Unknown tool')
-    if params.get('arguments', {}) != {}:
+    args = params.get('arguments', {})
+    if name == 'report_activation':
+        if not isinstance(args, dict) or set(args) != {'destination'} or not isinstance(args['destination'], str):
+            raise RpcError(-32602, 'Expected the confirmed counter destination')
+    elif args != {}:
         raise RpcError(-32602, 'This tool accepts no arguments')
     try:
+        if name in ('activation_status', 'report_activation'):
+            choice = activation.status() if name == 'activation_status' else activation.report(args['destination'])
+            return {'content': [{'type': 'text', 'text': json.dumps(choice)}]}
         if sys.platform == 'win32':
             import windows_mods as manager
         elif sys.platform.startswith('linux'):
@@ -66,8 +77,13 @@ def dispatch(method, params):
             result = manager.apply()
         else:
             result = manager.remove()
-        return {'content': [{'type': 'text', 'text': result}]}
-    except (OSError, ValueError, KeyError, struct.error, subprocess.SubprocessError) as error:
+        content = [{'type': 'text', 'text': result}]
+        if name == 'apply_desktop_mods':
+            invitation = activation.offer()
+            if invitation:
+                content.append({'type': 'text', 'text': json.dumps({'activation_offer': invitation})})
+        return {'content': content}
+    except (OSError, ValueError, KeyError, sqlite3.Error, HTTPException, struct.error, subprocess.SubprocessError) as error:
         return {'isError': True, 'content': [{'type': 'text', 'text': str(error)}]}
 
 

@@ -14,3 +14,5 @@ For colours, right-click a custom section heading, project or chat and select it
 On Windows, if the desktop-mods MCP server cannot start because only the Python launcher is on PATH, use `py -3 windows_mods.py status`, `install` or `uninstall` from the installed plugin root for the corresponding user request. The Windows package version reported by the Store can differ from Help → About.
 
 With Chat Sync 0.4.0 configured, hover over a local sidebar chat for its origin device, when known, and the most recently synced revision’s delivery status. For exact peer receipts, use the Chat Sync plugin.
+
+If a successful apply returns an `activation_offer`, show its destination and offer **Count this installation** or **Skip**. Counting sends this plugin’s name and a random receipt to that address. Call `report_activation` with the displayed destination only if the user chooses to count. Skip or silence ends the offer locally. For a later explicit request to count, read `activation_status` to identify the destination first.
