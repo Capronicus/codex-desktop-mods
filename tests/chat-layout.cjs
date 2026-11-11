@@ -79,6 +79,18 @@ async function run() {
     });
     assert.deepEqual(visibility, [[true,true,true],[false,false,true],[true,false,true],[true,true,true]]);
     console.log('Native timestamps restored when replacement times unmount, with message actions still visible.');
+    await page.setContent(`<div data-turn-key="turn"><span hidden data-csc-origin-thread="thread" data-csc-reply-turn="turn" data-csc-reply-role="turn"></span>
+      <div data-response-annotation-target="reply"><span role="button" data-file-reference data-markdown-copy-text="C:/Projects/Sample/src/file.txt:9:2-12:4">file.txt</span></div></div>`);
+    await page.addScriptTag({path:path.join(__dirname,'..','sidebar-colours.js')});
+    await page.evaluate(()=>{
+      window.localChatDetails={listenActions(){},openModControls:ctx=>{window.testAction=ctx;}};
+      window.electronBridge={showContextMenu:()=>({id:'file'})};
+      installChatActions();
+    });
+    await page.getByRole('button',{name:'file.txt'}).click({button:'right'});
+    const action=await page.evaluate(()=>window.testAction);
+    assert.deepEqual(action,{thread:'thread',turn:'turn',item:'reply',action:'file',reference:'C:/Projects/Sample/src/file.txt:9:2-12:4'});
+    console.log('Native file-reference menu preserves the original path and exact reply.');
   } finally {
     await browser.close();
   }

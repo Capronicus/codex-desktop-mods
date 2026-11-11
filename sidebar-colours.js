@@ -719,10 +719,12 @@ function installChatActions() {
     if(event.shiftKey || !window.electronBridge?.showContextMenu) return;
     const target=event.target.closest?.('[data-turn-key]');
     const marker=target?.querySelector(markerSelector);
-    if(!marker || marker.dataset.cscReplyRole==='user' || event.target.closest('input,textarea,[contenteditable=true],button'))return;
+    const fileRef=event.target.closest?.('[data-file-reference]');
+    if(!marker || marker.dataset.cscReplyRole==='user' || event.target.closest('input,textarea,[contenteditable=true]') ||
+       (event.target.closest('button') && !fileRef))return;
     const selected=String(window.getSelection()||'').trim();
     const anchor=event.target.closest('a,code');
-    let ref=selected || anchor?.getAttribute('href') || anchor?.textContent || '';
+    let ref=selected || fileRef?.getAttribute('data-markdown-copy-text') || anchor?.getAttribute('href') || anchor?.textContent || '';
     if(ref.startsWith('file:///')) {
       try{ref=decodeURIComponent(new URL(ref).pathname).replace(/^\/(?=[a-z]:\/)/i,'');}catch{ref='';}
     }

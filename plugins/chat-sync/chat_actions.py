@@ -74,7 +74,7 @@ def resolve_file(thread, reference):
         raise ValueError("Choose a shared chat with an explicitly linked local checkout.")
     if not isinstance(reference, str) or not 0 < len(reference) <= 4096 or any(ord(c) < 32 for c in reference):
         raise ValueError("Select a project file path.")
-    reference = re.sub(r"(?<=\S):\d+(?::\d+)?$|#L\d+(?:-L\d+)?$", "", reference.strip())
+    reference = re.sub(r"(?<=\S):\d+(?::\d+)?(?:-\d+(?::\d+)?)?$|#L\d+(?:-L\d+)?$", "", reference.strip())
     if reference.startswith(("//", "\\")) or "://" in reference:
         raise ValueError("Choose a path inside the linked project.")
     source = source_path(reference.replace("\\", "/"))

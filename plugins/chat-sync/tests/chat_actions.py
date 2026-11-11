@@ -75,7 +75,7 @@ class ChatActions(unittest.TestCase):
             actions.publish_roots(cfg,self.vault)
             key=actions.root_key(actions.source_path(r"C:\Projects\Sample"))
             sync.atomic(self.vault/"file-roots-v1"/(self.work+".json"),sync.encode({self.project:[key]}))
-            for ref in (r"c:\PROJECTS\Sample\src\test.txt:12:5","src/test.txt"):
+            for ref in (r"c:\PROJECTS\Sample\src\test.txt:12:5-14:7","src/test.txt"):
                 self.assertEqual(actions.open_file(self.thread,ref)["text"],"from Home")
             for ref in ("../secret","/unknown/test.txt","missing","//host/share"):
                 with self.assertRaises(ValueError):actions.open_file(self.thread,ref)
