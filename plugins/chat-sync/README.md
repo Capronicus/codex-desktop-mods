@@ -15,6 +15,10 @@ The installed plugin folder contains `sync.py`. Run `python3 /path/to/sync.py st
 
 **Mod Controls** opens from the desktop sidebar or by asking Chat Sync to open it. It shows the private folder, last attempt, last full success and delivery receipts. **Pause sync** suspends automatic and manual transfers on this computer. **Resume sync** restores the previous schedule. The CLI also accepts `pause` and `resume`. Disconnecting retains local-only rules for future connections and restores the same device identity when you reconnect the same folder.
 
+**Sync folder health** verifies the blocks used by current device revisions. **Check folder** saves the result on this computer and works while sync is paused. **Repair from this desktop** restores matching blocks from eligible local histories, including compressed archives. The CLI equivalents are `python3 sync.py check-folder` and `python3 sync.py repair-folder`. If blocks are still missing, run repair on another desktop that has the chat and wait for your folder client to transfer them. Missing revision metadata and unreadable files are reported separately.
+
+Before exporting changed history, Chat Sync stages the transcript in this device’s profile and checks the file and writer state. When a chat is deferred as busy or changes during the read, its staged bytes stay off the shared folder.
+
 The panel can also toggle wider chats, the pet dock, scroll animation, timestamps, token counts and branch lines. These switches are local to this computer. Reopen the desktop app with Desktop Mods 0.9.0 or later applied to see changes.
 
 ## What travels

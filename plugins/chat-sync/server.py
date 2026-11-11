@@ -12,6 +12,7 @@ import delivery
 import batches
 import activation
 import controls
+import integrity
 
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 STOP = threading.Event()
@@ -37,6 +38,8 @@ TOOLS = [
      "title": "Mod Controls", "_meta": {"ui": {"resourceUri": controls.URI},
                "openai/ui": {"entrypoints": [{"type": "global"}]}}},
     tool("mod_controls_status", "Read local sync health, receipt counts and visual preferences.", readonly=True),
+    tool("check_sync_folder", "Verify the blocks referenced by current shared chat revisions and save a local report.", readonly=True),
+    tool("repair_sync_folder", "Restore missing or damaged blocks of current shared chat revisions from eligible matching local history."),
     {**tool("mod_controls_sync", "Exchange chats with this desktop's configured folder."),
      "_meta": {"ui": {"visibility": ["app"]}}},
     tool("set_sync_paused", "Pause or resume chat sync on this desktop, keeping its sharing rules.",
@@ -141,6 +144,8 @@ ACTIONS = {
     "open_mod_controls": controls.status,
     "mod_controls_status": controls.status,
     "mod_controls_sync": controls.sync_now,
+    "check_sync_folder": integrity.inspect_folder,
+    "repair_sync_folder": lambda: integrity.inspect_folder(repair=True),
     "set_sync_paused": sync.set_paused,
     "set_mod_visual": controls.set_visual,
     "activation_status": activation.status,
@@ -190,7 +195,7 @@ def handle(req):
         version = params.get("protocolVersion")
         return {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[0],
-            "serverInfo": {"name": "chat-sync", "version": "0.7.0"},
+            "serverInfo": {"name": "chat-sync", "version": "0.8.0"},
             "capabilities": {"tools": {}, "resources": {}},
         }
     if method == "ping":

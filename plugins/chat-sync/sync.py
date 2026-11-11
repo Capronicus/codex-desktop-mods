@@ -4,7 +4,6 @@ from contextlib import contextmanager
 from datetime import datetime
 import gzip
 import hashlib
-import itertools
 import json
 import os
 from pathlib import Path
@@ -15,6 +14,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+import zlib
 
 import workspace_paths
 
@@ -145,7 +145,14 @@ def status():
             cfg and cfg.get("sidebar") and (STATE / "sidebar-layout-pending.json").is_file()
         ),
         "last_run": read_json(STATE / "last.json") if cfg else None,
+        "folder_check": last_folder_check(cfg),
     }
+
+
+def last_folder_check(cfg):
+    if cfg:
+        return read_json(STATE / ("integrity-" + cfg["device"] + ".json"))
+    return None
 
 
 def set_exchange_option(option, enabled):
@@ -290,61 +297,60 @@ def open_rollout(path):
             if proc.wait():
                 raise ValueError("Could not unpack the compressed conversation.")
     else:
-        with zstd.open(path, "rb") as stream:
-            yield stream
+        try:
+            with zstd.open(path, "rb") as stream:
+                yield stream
+        except zstd.ZstdError as exc:
+            raise ValueError("Could not unpack the compressed conversation.") from exc
+
+
+def block_path(vault, key):
+    if not isinstance(key, str) or not HEX.fullmatch(key):
+        raise ValueError("Invalid block reference")
+    return vault / "blocks" / key[:2] / (key + ".gz")
 
 
 def put_block(vault, data):
     key = digest(data)
-    dest = vault / "blocks" / key[:2] / (key + ".gz")
+    dest = block_path(vault, key)
     if not dest.exists():
         atomic(dest, gzip.compress(data, compresslevel=3, mtime=0))
     return key
 
 
 def block_data(vault, key):
-    if not isinstance(key, str) or not HEX.fullmatch(key):
-        raise ValueError("Invalid block reference")
-    path = vault / "blocks" / key[:2] / (key + ".gz")
+    path = block_path(vault, key)
     if path.stat().st_size > BLOCK + 65536:
         raise ValueError("Oversized block")
-    with gzip.open(path, "rb") as stream:
-        data = stream.read(BLOCK + 1)
+    try:
+        with gzip.open(path, "rb") as stream:
+            data = stream.read(BLOCK + 1)
+    except (gzip.BadGzipFile, EOFError, zlib.error) as exc:
+        raise ValueError("Unreadable compressed block") from exc
     if len(data) > BLOCK or digest(data) != key:
         raise ValueError("Block checksum mismatch")
     return data
 
 
-def snapshot(vault, tid, entry, name, known):
-    path, archived = entry
-    st = path.stat()
-    token = [str(path), st.st_size, st.st_mtime_ns, st.st_ino, name, archived]
-    if known and known.get("token") == token:
-        return known
+def stage_rollout(tid, path, st, staged):
+    """Freeze the wire representation locally before permitting any shared writes."""
     with open_rollout(path) as stream:
         records = workspace_paths.pieces(stream)
         first = next(records, b"")
         if len(first) > 8 * BLOCK or not first.endswith(b"\n"):
             raise ValueError("Unreadable conversation header")
         meta = json.loads(first)
-        info = meta.get("payload", {})
-        if meta.get("type") != "session_meta" or info.get("id") != tid:
+        info = meta.get("payload") if isinstance(meta, dict) else None
+        if not isinstance(info, dict) or meta.get("type") != "session_meta" or info.get("id") != tid:
             raise ValueError("Thread identity differs from filename")
         if info.get("source") not in ("cli", "vscode", "appServer", "app_server", None):
             return None
-        chunks, size, tail = [], 0, b""
-        pending = bytearray()
-        for part in itertools.chain((first,), records):
-            pending.extend(part)
-            while len(pending) >= BLOCK:
-                block = bytes(pending[:BLOCK])
-                del pending[:BLOCK]
-                chunks.append(put_block(vault, block))
-                tail = block[-65536:]
-            size += len(part)
-        if pending:
-            chunks.append(put_block(vault, bytes(pending)))
-            tail = (tail + pending)[-65536:]
+        staged.write(first)
+        for part in records:
+            staged.write(part)
+    size = staged.tell()
+    staged.seek(max(0, size - 65536))
+    tail = staged.read()
     end = path.stat()
     if (end.st_ino, end.st_size, end.st_mtime_ns) != (
         st.st_ino,
@@ -362,11 +368,28 @@ def snapshot(vault, tid, entry, name, known):
             last = json.loads(tail.rstrip(b"\n").split(b"\n")[-1])
         except ValueError:
             raise Busy()
-        if last.get("type") != "event_msg" or last.get("payload", {}).get("type") not in (
-            "task_complete",
-            "turn_aborted",
-        ):
+        if not isinstance(last, dict) or last.get("type") != "event_msg" or not isinstance(last.get("payload"), dict):
             raise Busy()
+        if last["payload"].get("type") not in ("task_complete", "turn_aborted"):
+            raise Busy()
+    staged.seek(0)
+    return info, meta.get("timestamp"), size
+
+
+def snapshot(vault, tid, entry, name, known):
+    path, archived = entry
+    st = path.stat()
+    token = [str(path), st.st_size, st.st_mtime_ns, st.st_ino, name, archived]
+    if known and known.get("token") == token:
+        return known
+    with tempfile.SpooledTemporaryFile(max_size=BLOCK, dir=STATE) as staged:
+        source = stage_rollout(tid, path, st, staged)
+        if source is None:
+            return None
+        info, timestamp, size = source
+        chunks = []
+        while data := staged.read(BLOCK):
+            chunks.append(put_block(vault, data))
     manifest = {
         "v": 1,
         "id": tid,
@@ -379,7 +402,7 @@ def snapshot(vault, tid, entry, name, known):
     }
     try:
         created_at = datetime.fromisoformat(
-            str(info.get("timestamp") or meta.get("timestamp")).replace("Z", "+00:00")
+            str(info.get("timestamp") or timestamp).replace("Z", "+00:00")
         ).timestamp()
     except (ValueError, OSError, OverflowError):
         created_at = 0

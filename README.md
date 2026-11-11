@@ -25,6 +25,8 @@ codex plugin add codex-desktop-mods@capronicus-desktop-mods
 
 ## Mod Controls
 
+If a chat stays stuck during transfer, open **Sync folder health → Check folder**. For missing or damaged blocks, choose **Repair from this desktop** on a computer with a complete copy. Let your folder client finish, then check again on the receiving desktop.
+
 Install **Codex Chat Sync** from the same marketplace, then open **Mod Controls** in the desktop sidebar. You can also ask Chat Sync to **Open Mod Controls**. The panel shows the last sync attempt, the last full success, and how many current chat revisions another desktop has acknowledged. **Pause sync** preserves the device name, sharing choices and local-only rules.
 
 The six appearance switches work without connecting a folder. Install or update **Codex Desktop Mods** to 0.9.0, ask it to **Apply the desktop mods**, and fully reopen the patched app for visual changes to take effect.

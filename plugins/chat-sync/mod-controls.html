@@ -16,6 +16,10 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 <dl id="health"></dl><p id="delivery"></p><ul id="peers" hidden></ul>
 <details id="sharing" hidden><summary>Sharing options and local-only rules</summary><div id="options"></div><p id="rules"></p></details>
 <div class="actions"><button id="run" disabled>Sync now</button><button id="pause" disabled>Pause sync</button></div></section>
+<section id="integrity" hidden><h2>Sync folder health</h2>
+<p id="report">Check that this desktop’s sync folder has a complete copy of each currently shared chat revision.</p>
+<p id="repair-hint" class="hint"></p>
+<div class="actions"><button id="check" disabled>Check folder</button><button id="repair" hidden disabled>Repair from this desktop</button></div></section>
 <section><h2>Desktop appearance</h2><p class="hint">Applies to this computer with Desktop Mods 0.9 or later. Quit and reopen the desktop app to use your changes.</p><div id="visuals"></div></section>
 </main><script>
 'use strict';
@@ -86,6 +90,26 @@ function render(){
   el('rules').textContent=['Local-only chats: '+(s.privateChats.join(', ')||'None'),'Local-only projects: '+(s.privateProjects.join(', ')||'None')].join('\n');
   el('run').disabled=working||!s.configured||s.paused||!s.available;
   el('pause').textContent=s.paused?'Resume sync':'Pause sync';el('pause').disabled=working||!s.configured;
+  el('integrity').hidden=!s.configured;
+  const report=s.integrity;
+  el('check').disabled=working||!s.available;
+  el('repair').hidden=!(report && (report.missing||report.damaged));
+  el('repair').disabled=working||!s.available||s.paused;
+  let hint='';
+  if(report){
+    const problems=[
+      [report.missing,'missing blocks'],[report.damaged,'damaged blocks'],
+      [report.unreadable,'unreadable blocks'],[report.incomplete_chats,'chats with incomplete metadata']
+    ].filter(([count])=>count).map(([count,label])=>label+': '+count);
+    const result=problems.length?problems.join(' · '):report.chats?'All referenced blocks verified.':'No shared chat revisions to check.';
+    const restored=report.operation==='repair'?' Blocks restored: '+report.restored+'.':'';
+    el('report').textContent=result+restored+' Last checked '+new Date(report.checked_at*1000).toLocaleString()+' · chats: '+report.chats+' · blocks: '+report.blocks;
+    if(report.missing||report.damaged)
+      hint=s.paused?'Resume sync to allow repairs.':'Repair on a desktop with a complete copy. Let your folder client transfer the files, then check again here.';
+    if(report.busy) hint+=' Some local chats are busy. Retry after the turn finishes.';
+    if(report.unavailable_sources||report.unreadable||report.incomplete_chats) hint+=' Check that your folder client has finished downloading and the files are available offline.';
+  }else el('report').textContent='Check that this desktop’s sync folder has a complete copy of each currently shared chat revision.';
+  el('repair-hint').textContent=hint.trim();
   for(const key of Object.keys(features)){
     if(!working) el(key).checked=s.visuals[key];
     el(key).disabled=working||(key==='petMotion'&&!s.visuals.petDock);
@@ -97,7 +121,7 @@ function render(){
 }
 async function act(tool,args={},message=''){
   if(working) return;
-  working=true;render();el('notice').textContent=tool==='mod_controls_sync'?'Syncing…':'';
+  working=true;render();el('notice').textContent=({mod_controls_sync:'Syncing…',check_sync_folder:'Checking shared chat revisions…',repair_sync_folder:'Verifying and restoring matching blocks…'})[tool]||'';
   try {
     if(tool) await call(tool,args);
     state=await call('mod_controls_status');el('notice').textContent=message;
@@ -109,9 +133,11 @@ async function act(tool,args={},message=''){
 el('refresh').onclick=()=>act();
 el('run').onclick=()=>act('mod_controls_sync');
 el('pause').onclick=()=>act('set_sync_paused',{paused:!state.paused});
+el('check').onclick=()=>act('check_sync_folder');
+el('repair').onclick=()=>act('repair_sync_folder');
 async function connect(){
   try{
-    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.7.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
+    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.8.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
     theme(host.hostContext);send({method:'ui/notifications/initialized',params:{}});
     new ResizeObserver(()=>send({method:'ui/notifications/size-changed',params:{height:document.querySelector('main').offsetHeight}})).observe(document.querySelector('main'));
     working=false;await act();

@@ -48,6 +48,7 @@ def status():
         "paused": bool(cfg.get("paused")), "automatic": bool(cfg.get("automatic")),
         "options": {k: bool(cfg.get(k)) for k in ("colours", "settings", "sidebar", "order")},
         "health": health, "receipts": counts, "peers": list(peers.values()),
+        "integrity": sync.last_folder_check(cfg),
         "privateChats": rules.get("private_chats", []), "privateProjects": rules.get("private_projects", []),
         "visuals": visuals(),
     }

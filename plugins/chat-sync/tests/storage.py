@@ -41,12 +41,12 @@ run(b, "setup", str(v))
 assert run(a, "sync")["exported"] == 1
 vault = v / "codex-chat-sync-v1"
 block = next((vault / "blocks").rglob("*.gz"))
-old = block.read_bytes()
 block.unlink()
 assert tid in run(b, "sync")["skipped"] and not (b / "archived_sessions" / name).exists()
 block.write_bytes(gzip.compress(b"tampered"))
 assert tid in run(b, "sync")["skipped"] and not (b / "archived_sessions" / name).exists()
-block.write_bytes(old)
+assert run(a, "check-folder")["damaged"] == 1
+assert run(a, "repair-folder")["restored"] == 1
 assert run(b, "sync")["imported"] == 1
 bp = b / "archived_sessions" / name
 assert bp.read_bytes() == text
