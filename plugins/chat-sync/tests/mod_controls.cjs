@@ -171,6 +171,9 @@ async function run() {
     await panel.getByRole('switch',{name:'Projects and sections'}).uncheck();
     await panel.getByRole('button',{name:'Pause sync'}).click();
     await panel.getByText('Sync paused', {exact:true}).waitFor();
+    await panel.getByRole('button',{name:'Preview outgoing chats'}).click();
+    await panel.getByRole('button',{name:'Keep local · Home fixture'}).click();
+    await panel.getByText('Excluded by chat rule · Archived').waitFor();
     assert.equal(JSON.parse(await fs.readFile(queue)).undo,true);
     await page.setViewportSize({width:360,height:740});
     const frame = page.frames().find(frame => frame.parentFrame());

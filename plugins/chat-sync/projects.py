@@ -261,7 +261,9 @@ def set_private(kind, ident, enabled):
         sync.atomic(sync.CONFIG, sync.encode(cfg))
         # Do not apply a queued membership from before the sharing decision.
         if enabled:
-            (sync.STATE / "sidebar-layout-pending.json").unlink(missing_ok=True)
+            queue = sync.STATE / "sidebar-layout-pending.json"
+            if not sync.read_json(queue, {}).get("undo"):
+                queue.unlink(missing_ok=True)
             doc = sync.read_json(sync.STATE / "delivery.json", {})
             if doc.get("device") == cfg["device"]:
                 private = Sharing(cfg, vault, sync.catalog(), sync.HOME).private_chats
