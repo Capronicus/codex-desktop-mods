@@ -24,7 +24,7 @@ class ChatActions(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        root = Path(self.temp.name)
+        root = Path(self.temp.name).resolve()
         self.vault = root / "vault" / "codex-chat-sync-v1"
         self.vault.mkdir(parents=True)
         self.work, self.home, self.project, self.thread, self.turn = [ident() for _ in range(5)]

@@ -1,6 +1,6 @@
 """Exchange completed Codex conversations through a user-selected private folder."""
 
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime
 import gzip
 import hashlib
@@ -246,7 +246,7 @@ def catalog(include_titles=False):
     if not db.is_file():
         raise ValueError("This profile has no supported local Codex thread catalogue.")
     result = {}
-    with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as conn:
+    with closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as conn:
         conn.row_factory = sqlite3.Row
         columns = "id, rollout_path, name, archived, source, cwd"
         available = {info[1] for info in conn.execute("PRAGMA table_info(threads)")}
@@ -560,7 +560,6 @@ def invalidate_projection(tid):
     }
     # This database contains only the timeline projection. Codex rebuilds the
     # rows from the rollout when it next opens the chat. Refuse unfamiliar layouts.
-    from contextlib import closing
 
     with closing(sqlite3.connect(db.as_uri() + "?mode=rw", uri=True, timeout=2)) as conn:
         known = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
