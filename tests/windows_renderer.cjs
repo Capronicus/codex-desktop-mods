@@ -31,6 +31,10 @@ async function probe(url) {
     const turn = '01a1aa55-1234-7000-8000-000000000012';
     const parent = '01a1aa55-1234-7000-8000-000000000010';
     const data = await evaluate(`window.localChatDetails.readTurns("${thread}", ["${turn}"])`);
+    const visuals = await evaluate('window.localChatDetails.visuals');
+    assert.equal(visuals.branchLines, false);
+    assert.equal(visuals.petMotion, false);
+    assert.equal(visuals.timestamps, true);
     console.log('Renderer fixture', JSON.stringify(data), 'at', await evaluate('location.pathname'));
     assert.equal(data[turn]?.tokens, 25, 'reply token count');
     assert.equal(data[turn]?.total, 125, 'cumulative token count');
@@ -43,6 +47,7 @@ async function probe(url) {
     const project = 'document.querySelector(\'[data-app-action-sidebar-project-label="Windows QA"]\')';
     for (let i = 0; i < 45 && !await evaluate(`!!${project}`); i++) await wait(700);
     assert.equal(await evaluate(`!!${project}`), true, 'native sidebar project');
+    assert.equal(await evaluate("!!document.getElementById('csc-fork-lines')"), false);
     await evaluate(`${project}.dispatchEvent(new MouseEvent('contextmenu',{shiftKey:true,bubbles:true,cancelable:true}))`);
     for (let i = 0; i < 30 && !await evaluate("!!document.querySelector('dialog.csc-picker[open]')"); i++) await wait(100);
     assert.equal(await evaluate("document.querySelector('dialog.csc-picker h2')?.innerText"), 'Project colour');

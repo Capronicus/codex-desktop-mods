@@ -23,6 +23,12 @@ codex plugin marketplace add Capronicus/codex-desktop-mods
 codex plugin add codex-desktop-mods@capronicus-desktop-mods
 ```
 
+## Mod Controls
+
+Install **Codex Chat Sync** from the same marketplace, then open **Mod Controls** in the desktop sidebar. You can also ask Chat Sync to **Open Mod Controls**. The panel shows the last sync attempt, the last full success, and how many current chat revisions another desktop has acknowledged. **Pause sync** preserves the device name, sharing choices and local-only rules.
+
+The six appearance switches work without connecting a folder. Install or update **Codex Desktop Mods** to 0.9.0, ask it to **Apply the desktop mods**, and fully reopen the patched app for visual changes to take effect.
+
 ## Install Chat Organizer on Windows or Linux
 
 In **Plugins**, refresh the **Capronicus Desktop Mods** marketplace. To add it for the first time, choose **Add → Add marketplace** and enter `https://github.com/Capronicus/codex-desktop-mods`. Select **Chat Organizer** and click **Install**. In a new chat, select the plugin and ask **“Preview a cleanup of my sidebar.”**

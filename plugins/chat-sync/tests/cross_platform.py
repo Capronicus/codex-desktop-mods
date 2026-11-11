@@ -38,6 +38,14 @@ def find_chat(app, title):
 
 def plugin(app):
     tid = app.call("thread/start", {"ephemeral": True, "cwd": str(ROOT)})["thread"]["id"]
+    panel = app.call("mcpServer/tool/call", {
+        "threadId": tid, "server": "chat-sync", "tool": "open_mod_controls", "arguments": {},
+    })
+    assert panel["content"][0]["text"] == "Mod Controls", panel
+    ui = app.call("mcpServer/resource/read", {
+        "threadId": tid, "server": "chat-sync", "uri": "ui://chat-sync/mod-controls.html",
+    })["contents"][0]
+    assert ui["mimeType"] == "text/html;profile=mcp-app" and "ui/initialize" in ui["text"]
 
     def call(name, **args):
         result = app.call("mcpServer/tool/call", {

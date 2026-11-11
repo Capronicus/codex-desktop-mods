@@ -232,6 +232,8 @@ def review(action="preview", batch=""):
 
     with sync.lock(sync.STATE / "sync.lock"):
         cfg, vault = projects.config()
+        if action != "preview":
+            sync.require_active(cfg)
         if not cfg.get("sidebar"):
             raise ValueError("Enable sidebar sync on this computer first.")
         index = sync.catalog()

@@ -1,7 +1,7 @@
 // Loaded alongside the desktop sidebar renderer. Each key is one local preference,
 // so edits to different items in separate windows cannot overwrite each other.
 function createSidebarColours({preferencesReady, getPreference, setPreference, preferenceKeys, watchPreferencePrefix, readProjectPage}) {
-  installForkLines();
+  if (window.localChatDetails?.visuals?.branchLines !== false) installForkLines();
   installDeliveryStatus();
   const prefix = 'codex.sidebar-colours.v1/';
   const projectAttr = 'data-app-action-sidebar-project-id';

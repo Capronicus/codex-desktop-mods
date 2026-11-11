@@ -11,6 +11,12 @@ This local desktop plugin exchanges Codex chat histories through a folder on eac
 
 The installed plugin folder contains `sync.py`. Run `python3 /path/to/sync.py status`, `sync`, `setup "/path/to/folder" --automatic`, `watch` or `disable`. The standalone watcher can run while the desktop is closed. Disabled sync leaves existing local and shared copies in place. To remove the plugin, run `codex plugin remove chat-sync@capronicus-desktop-mods`.
 
+## Mod Controls
+
+**Mod Controls** opens from the desktop sidebar or by asking Chat Sync to open it. It shows the private folder, last attempt, last full success and delivery receipts. **Pause sync** suspends automatic and manual transfers on this computer. **Resume sync** restores the previous schedule. The CLI also accepts `pause` and `resume`. Disconnecting retains local-only rules for future connections and restores the same device identity when you reconnect the same folder.
+
+The panel can also toggle wider chats, the pet dock, scroll animation, timestamps, token counts and branch lines. These switches are local to this computer. Reopen the desktop app with Desktop Mods 0.9.0 or later applied to see changes.
+
 ## What travels
 
 The first sync takes the union of eligible local Codex chats. It includes chat messages, stored tool results, natively recorded fork ancestry and display names. Conversations found in native Zstandard storage require Python 3.14+ or the `zstd` executable. Imported archived chats start archived. Later archive and delete actions apply to the device where you take them.

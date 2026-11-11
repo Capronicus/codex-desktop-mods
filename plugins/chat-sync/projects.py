@@ -130,6 +130,7 @@ def inventory():
 def link(local_project, shared_project, folder):
     with sync.lock(sync.STATE / "sync.lock"):
         cfg, vault = config()
+        sync.require_active(cfg)
         inv = inventory()
         if local_project not in inv["local"] or shared_project not in inv["shared"]:
             raise ValueError("Choose a local project and a shared project from list_sync_projects.")

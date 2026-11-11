@@ -109,6 +109,9 @@ def setup(folder, automatic=False):
         old = read_json(CONFIG, {})
         if old and old["folder"] != str(base):
             raise ValueError("Disable this location before selecting a different folder.")
+        if not old:
+            saved = read_json(STATE / "disconnected.json", {})
+            old = {**saved.get("devices", {}).get(str(base), {}), **saved.get("exclusions", {})}
         cfg = {
             **old,
             "origin_since": old.get("origin_since", time.time()),
@@ -131,6 +134,7 @@ def status():
         "folder": cfg and cfg["folder"],
         "device": cfg and cfg["device"],
         "automatic": bool(cfg and cfg["automatic"]),
+        "paused": bool(cfg and cfg.get("paused")),
         "colours": bool(cfg and cfg.get("colours")),
         "settings": bool(cfg and cfg.get("settings")),
         "sidebar": bool(cfg and cfg.get("sidebar")),
@@ -140,7 +144,7 @@ def status():
         "sidebar_layout_pending": bool(
             cfg and cfg.get("sidebar") and (STATE / "sidebar-layout-pending.json").is_file()
         ),
-        "last_run": read_json(STATE / "last.json"),
+        "last_run": read_json(STATE / "last.json") if cfg else None,
     }
 
 
@@ -170,6 +174,7 @@ def sync_settings_now():
 
     with lock(STATE / "sync.lock"):
         cfg, vault = projects.config()
+        require_active(cfg)
         if not cfg.get("settings"):
             raise ValueError("Enable appearance and chat settings sync on this desktop first.")
         if not vault.is_dir():
@@ -183,6 +188,7 @@ def sync_colours_now():
 
     with lock(STATE / "sync.lock"):
         cfg, vault = projects.config()
+        require_active(cfg)
         if not cfg.get("colours"):
             raise ValueError("Enable colour sync on this desktop first.")
         if not vault.is_dir():
@@ -194,9 +200,36 @@ def sync_colours_now():
 
 def disable():
     with lock(STATE / "sync.lock"):
+        cfg = read_json(CONFIG)
+        if cfg:
+            saved = read_json(STATE / "disconnected.json", {})
+            saved.setdefault("devices", {})[cfg["folder"]] = {
+                k: cfg[k] for k in ("device", "device_name", "origin_since", "project_links") if k in cfg
+            }
+            saved["exclusions"] = {k: cfg.get(k, []) for k in ("private_chats", "private_projects")}
+            atomic(STATE / "disconnected.json", encode(saved))
         CONFIG.unlink(missing_ok=True)
-        (STATE / "sidebar-layout-pending.json").unlink(missing_ok=True)
+        for name in ("sidebar-layout-pending.json", "sidebar-preview.json", "last.json"):
+            (STATE / name).unlink(missing_ok=True)
     return {"configured": False}
+
+
+def require_active(cfg):
+    if cfg.get("paused"):
+        raise ValueError("Chat sync is paused. Resume it before exchanging data.")
+
+
+def set_paused(paused):
+    with lock(STATE / "sync.lock"):
+        cfg = read_json(CONFIG)
+        if not cfg or type(paused) is not bool:
+            raise ValueError("Choose a private sync folder first.")
+        cfg["paused"] = paused
+        atomic(CONFIG, encode(cfg))
+        if not paused and (STATE / "sidebar-layout-pending.json").exists():
+            import desktop_layout
+            desktop_layout.start_worker(HOME)
+    return {"paused": paused}
 
 
 def catalog():
@@ -593,19 +626,50 @@ def materialize(vault, man, local, cwd=None, checkout=None):
     return dest
 
 
-def run(automatic=False):
+@contextmanager
+def sync_attempt(automatic):
     with lock(STATE / "sync.lock"):
         cfg = read_json(CONFIG)
         if not cfg:
             raise ValueError("Choose a private sync folder first.")
+        health_file = STATE / ("health-" + cfg["device"] + ".json")
+        health = read_json(health_file, {})
+        if automatic and (cfg.get("paused") or not cfg["automatic"]
+                          or time.time() - health.get("attempt", 0) < 55):
+            yield None
+            return
+        require_active(cfg)
+        health.update(attempt=time.time(), outcome="started", error=None)
+        atomic(health_file, encode(health))
+        try:
+            yield cfg
+        except Exception as exc:
+            health.update(outcome="failed", error=str(exc) or "Chat is busy. Retry shortly.")
+            raise
+        else:
+            stats = read_json(STATE / "last.json")
+            issues = [str(v["error"]) for v in stats.values() if isinstance(v, dict) and v.get("error")]
+            deferred = any(stats.get(k) for k in ("skipped", "conflicts", "busy", "pending_names", "unavailable_local"))
+            for area in ("sidebar", "colours", "settings"):
+                details = stats.get(area, {})
+                if any(details.get(k) for k in ("preview_required", "desktop_refresh_on_quit", "pending_chats",
+                                                "deferred_devices", "skipped_local", "sections_need_sign_in")):
+                    deferred = True
+            health.update(outcome="partial" if issues or deferred else "completed", error=" · ".join(issues) or None)
+            if health["outcome"] == "completed":
+                health["success"] = time.time()
+        finally:
+            atomic(health_file, encode(health))
+
+
+def run(automatic=False):
+    with sync_attempt(automatic) as cfg:
+        if cfg is None:
+            return {}
         vault = Path(cfg["folder"]) / "codex-chat-sync-v1"
         if not vault.is_dir():
             raise ValueError("Sync folder unavailable. Check the mount or desktop sync client.")
         device = cfg["device"]
-        if automatic:
-            last = STATE / "last.json"
-            if not cfg["automatic"] or (last.is_file() and time.time() - last.stat().st_mtime < 55):
-                return {}
         recover_projections()
         state_path = STATE / ("state-" + device + ".json")
         state = read_json(state_path, {})
@@ -835,6 +899,7 @@ def keep_branch(tid, device):
         cfg = read_json(CONFIG)
         if not cfg:
             raise ValueError("Choose a private sync folder first.")
+        require_active(cfg)
         vault = Path(cfg["folder"]) / "codex-chat-sync-v1"
         import projects
 
@@ -893,10 +958,11 @@ def adopt_history(tid, device):
     if not (UUID.fullmatch(tid) and UUID.fullmatch(device)):
         raise ValueError("Invalid thread or device ID")
     with lock(STATE / "sync.lock"):
-        recover_projections()
         cfg = read_json(CONFIG)
         if not cfg or cfg["device"] == device:
             raise ValueError("Select a different device from this chat’s conflict report.")
+        require_active(cfg)
+        recover_projections()
         vault = Path(cfg["folder"]) / "codex-chat-sync-v1"
         import projects
 

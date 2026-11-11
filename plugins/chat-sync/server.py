@@ -11,6 +11,7 @@ import projects
 import delivery
 import batches
 import activation
+import controls
 
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 STOP = threading.Event()
@@ -32,6 +33,16 @@ def tool(name, description, fields=None, readonly=False):
 
 
 TOOLS = [
+    {**tool("open_mod_controls", "Open Mod Controls to see sync health, pause transfers and change appearance.", readonly=True),
+     "title": "Mod Controls", "_meta": {"ui": {"resourceUri": controls.URI},
+               "openai/ui": {"entrypoints": [{"type": "global"}]}}},
+    tool("mod_controls_status", "Read local sync health, receipt counts and visual preferences.", readonly=True),
+    {**tool("mod_controls_sync", "Exchange chats with this desktop's configured folder."),
+     "_meta": {"ui": {"visibility": ["app"]}}},
+    tool("set_sync_paused", "Pause or resume chat sync on this desktop, keeping its sharing rules.",
+         {"paused": {"type": "boolean"}}),
+    tool("set_mod_visual", "Change a visual preference on this desktop.",
+         {"feature": {"type": "string", "enum": list(controls.FEATURES)}, "enabled": {"type": "boolean"}}),
     tool(
         "list_sync_projects",
         "List local project IDs, checkout folders, shared projects and explicit links.",
@@ -127,6 +138,11 @@ TOOLS = [
     ),
 ] + activation.TOOLS
 ACTIONS = {
+    "open_mod_controls": controls.status,
+    "mod_controls_status": controls.status,
+    "mod_controls_sync": controls.sync_now,
+    "set_sync_paused": sync.set_paused,
+    "set_mod_visual": controls.set_visual,
     "activation_status": activation.status,
     "report_activation": activation.report,
     "list_sync_projects": projects.inventory,
@@ -156,7 +172,7 @@ def background():
     while not STOP.wait(10):
         try:
             cfg = sync.read_json(sync.CONFIG)
-            if cfg and cfg["automatic"]:
+            if cfg and cfg["automatic"] and not cfg.get("paused"):
                 sync.run(automatic=True)
         except sync.Busy:
             pass
@@ -174,13 +190,19 @@ def handle(req):
         version = params.get("protocolVersion")
         return {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[0],
-            "serverInfo": {"name": "chat-sync", "version": "0.6.0"},
-            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "chat-sync", "version": "0.7.0"},
+            "capabilities": {"tools": {}, "resources": {}},
         }
     if method == "ping":
         return {}
     if method == "tools/list":
         return {"tools": TOOLS}
+    if method == "resources/list":
+        return {"resources": [{"uri": controls.URI, "name": "Mod Controls", "mimeType": controls.MIME}]}
+    if method == "resources/templates/list":
+        return {"resourceTemplates": []}
+    if method == "resources/read" and params.get("uri") == controls.URI:
+        return {"contents": [controls.resource()]}
     if method != "tools/call" or params.get("name") not in ACTIONS:
         raise ValueError("Unknown method or tool")
     name = params["name"]
@@ -197,6 +219,9 @@ def handle(req):
         raise ValueError("Invalid tool arguments")
     try:
         result = ACTIONS[name](**args)
+        if name in ("open_mod_controls", "mod_controls_status"):
+            return {"structuredContent": result,
+                    "content": [{"type": "text", "text": "Mod Controls" if name == "open_mod_controls" else json.dumps(result)}]}
         content = [{"type": "text", "text": json.dumps(result)}]
         if name == "sync_chats":
             invitation = activation.offer()

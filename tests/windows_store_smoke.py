@@ -36,6 +36,7 @@ def main():
         if any((home/name).exists() for name in ('auth.json','.codex-global-state.json','config.toml')):
             raise RuntimeError('Expected an unused runner profile.')
         project = '01a1aa55-1234-7000-8000-000000000001'
+        (home/'desktop-mod-controls.json').write_text(json.dumps({'branchLines':False,'petMotion':False}))
         now = int(time.time() * 1000)
         (home/'auth.json').write_text(json.dumps({'auth_mode':'apikey','OPENAI_API_KEY':'local-offline-fixture'}))
         (home/'config.toml').write_text('model_provider="offline"\nmodel="fixture"\n'

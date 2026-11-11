@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mod Controls</title>
+<style>
+:root{color-scheme:light dark;font:15px/1.5 "Inter",system-ui,sans-serif;color:var(--color-text-primary,CanvasText);background:var(--color-background-primary,Canvas)}
+*{box-sizing:border-box}body{margin:0}main{max-width:60rem;margin:auto;padding:clamp(16px,4vw,48px)}h1{font-size:clamp(25px,4vw,36px);line-height:1.2;margin:0 0 1.2rem}h2{font-size:18px;margin:0}.head,.row,.actions{display:flex;align-items:center;justify-content:space-between;gap:12px}.head{margin-bottom:12px}
+section{border:1px solid color-mix(in srgb,currentColor 20%,transparent);border-radius:14px;padding:clamp(16px,3vw,24px);margin-bottom:16px}
+button{background:var(--color-background-secondary,ButtonFace);color:inherit;border:1px solid color-mix(in srgb,currentColor 32%,transparent);border-radius:8px;font:inherit;font-weight:550;padding:6px 14px;cursor:pointer}button:disabled{opacity:.5;cursor:default}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid Highlight;outline-offset:3px}p{margin:6px 0 12px}.actions{justify-content:flex-start;flex-wrap:wrap;margin-top:16px}
+.row{padding:8px 0;border-top:1px solid color-mix(in srgb,currentColor 13%,transparent);cursor:pointer}.row input{flex:none;width:32px;height:19px;appearance:none;border:1px solid GrayText;border-radius:12px;position:relative;cursor:pointer;color:GrayText}.row input:before{content:"";position:absolute;border-radius:50%;width:11px;height:11px;background:currentColor;top:3px;left:3px}.row input:checked{background:Highlight;color:HighlightText;border-color:Highlight}.row input:checked:before{left:16px}.row input:disabled{opacity:.45;cursor:default}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0}dt,.hint{color:var(--color-text-secondary,GrayText)}dd{margin:0;overflow-wrap:anywhere}summary{cursor:pointer}details{margin-top:12px}#rules{white-space:pre-line;overflow-wrap:anywhere}#notice:not(:empty){padding:10px;border:1px solid currentColor;border-radius:8px;margin:12px 0}ul{padding-inline-start:22px}#overview{font-weight:650}button[hidden],[hidden]{display:none!important}@media(max-width:400px){dl{grid-template-columns:1fr;gap:0}dd{margin-bottom:5px}}
+</style></head><body><main>
+<div class="head"><h1>Mod Controls</h1><button id="refresh" disabled>Refresh</button></div>
+<p id="notice" role="status" aria-live="polite">Connecting to Chat Sync…</p>
+<section><h2>Chat sync</h2><p id="overview"></p><p id="setup" hidden>To connect this desktop, ask Chat Sync to use a private folder you choose.</p>
+<dl id="health"></dl><p id="delivery"></p><ul id="peers" hidden></ul>
+<details id="sharing" hidden><summary>Sharing options and local-only rules</summary><div id="options"></div><p id="rules"></p></details>
+<div class="actions"><button id="run" disabled>Sync now</button><button id="pause" disabled>Pause sync</button></div></section>
+<section><h2>Desktop appearance</h2><p class="hint">Applies to this computer with Desktop Mods 0.9 or later. Quit and reopen the desktop app to use your changes.</p><div id="visuals"></div></section>
+</main><script>
+'use strict';
+const el = id => document.getElementById(id);
+const features = {wideChat:'Wider chats',petDock:'Pet in the chat margin',petMotion:'Pet runs while scrolling',timestamps:'Message timestamps',tokens:'Turn and chat token counts',branchLines:'Lines between branched chats'};
+const options = {colours:['Colours and saved swatches','set_colour_sync'],settings:['Appearance and chat preferences','set_settings_sync'],sidebar:['Projects and sections','set_sidebar_sync'],order:['Pins and order','set_pin_order_sync']};
+const pending = new Map();
+let seq = 0, state, working = true;
+function send(message){parent.postMessage({jsonrpc:'2.0',...message},'*')}
+function rpc(method,params){
+  return new Promise((resolve,reject)=>{
+    const id=++seq;
+    const timer=setTimeout(()=>{pending.delete(id);reject(new Error('The host has not responded. Refresh to check the latest state.'))},method==='tools/call'?180000:12000);
+    pending.set(id,{resolve,reject,timer});send({id,method,params});
+  });
+}
+function theme(context){
+  if(['dark','light'].includes(context?.theme)) document.documentElement.style.colorScheme=context.theme;
+}
+window.addEventListener('message',event=>{
+  if(event.source!==parent || event.data?.jsonrpc!=='2.0') return;
+  const msg=event.data;
+  if(msg.method==='ui/notifications/host-context-changed') theme(msg.params);
+  if(msg.method==='ui/resource-teardown'){send({id:msg.id,result:{}});return}
+  if(msg.method==='ping' && msg.id!=null){send({id:msg.id,result:{}});return}
+  const reply=pending.get(msg.id);
+  if(!reply || msg.method) return;
+  clearTimeout(reply.timer);pending.delete(msg.id);
+  if(msg.error) reply.reject(new Error(msg.error.message));else reply.resolve(msg.result);
+});
+async function call(name,args={}){
+  const reply=await rpc('tools/call',{name,arguments:args});
+  if(reply.isError) throw new Error(reply.content?.[0]?.text || 'The operation failed.');
+  return reply.structuredContent ?? JSON.parse(reply.content[0].text);
+}
+function switchRow(container,key,label,change){
+  const row=document.createElement('label'),input=document.createElement('input');
+  row.className='row';input.type='checkbox';input.setAttribute('role','switch');input.id=key;input.disabled=true;
+  row.append(document.createTextNode(label),input);el(container).append(row);
+  input.onchange=()=>change(input.checked);
+}
+for(const [key,label] of Object.entries(features))
+  switchRow('visuals',key,label,enabled=>act('set_mod_visual',{feature:key,enabled},'Saved on this computer.'));
+for(const [key,[label,tool]] of Object.entries(options))
+  switchRow('options',key,label,enabled=>act(tool,{enabled},'Sharing preference saved.'));
+function field(label,value){
+  const dt=document.createElement('dt'),dd=document.createElement('dd');
+  dt.textContent=label;dd.textContent=value;el('health').append(dt,dd);
+}
+function render(){
+  el('refresh').disabled=working;
+  if(!state) return;
+  const s=state,h=s.health,r=s.receipts;
+  el('overview').textContent=!s.configured?'Disconnected':s.paused?'Sync paused':!s.available?'Folder unavailable':s.automatic?'Automatic sync on':'Manual sync';
+  el('setup').hidden=s.configured;el('health').replaceChildren();
+  if(s.configured){
+    field('This desktop',s.device);field('Private folder',s.folder+(s.available?'':' (unavailable)'));
+    const date=v=>v?new Date(v*1000).toLocaleString():'No record yet';
+    field('Last attempt',date(h.attempt));field('Last full success',date(h.success));
+    if(h.outcome) field('Last result',({completed:'Completed',partial:'Some items are pending',failed:'Failed',started:'Started · no completion recorded'})[h.outcome]);
+    if(h.error) field('Details',h.error);
+  }
+  el('delivery').textContent=s.configured&&Object.keys(r).length?'Latest chat revisions at last sync: '+(r.saved||0)+' awaiting a receipt · '+(r.received||0)+' received by another desktop'+(r.conflict?' · '+r.conflict+' in conflict':'')+(r.busy?' · '+r.busy+' busy':'')+(r.waiting?' · '+r.waiting+' waiting':''):'';
+  el('peers').replaceChildren();el('peers').hidden=!s.peers.length;
+  for(const p of s.peers){const li=document.createElement('li');li.textContent=p.name+' received '+p.received;el('peers').append(li)}
+  el('sharing').hidden=!s.configured&&!s.privateChats.length&&!s.privateProjects.length;
+  el('options').hidden=!s.configured;
+  el('rules').textContent=['Local-only chats: '+(s.privateChats.join(', ')||'None'),'Local-only projects: '+(s.privateProjects.join(', ')||'None')].join('\n');
+  el('run').disabled=working||!s.configured||s.paused||!s.available;
+  el('pause').textContent=s.paused?'Resume sync':'Pause sync';el('pause').disabled=working||!s.configured;
+  for(const key of Object.keys(features)){
+    if(!working) el(key).checked=s.visuals[key];
+    el(key).disabled=working||(key==='petMotion'&&!s.visuals.petDock);
+  }
+  for(const key of Object.keys(options)){
+    if(!working) el(key).checked=s.options[key];
+    el(key).disabled=working||!s.configured||(key==='order'&&!s.options.sidebar);
+  }
+}
+async function act(tool,args={},message=''){
+  if(working) return;
+  working=true;render();el('notice').textContent=tool==='mod_controls_sync'?'Syncing…':'';
+  try {
+    if(tool) await call(tool,args);
+    state=await call('mod_controls_status');el('notice').textContent=message;
+  } catch(e){
+    el('notice').textContent=e.message;
+    if(tool) try{state=await call('mod_controls_status')}catch{}
+  } finally{working=false;render()}
+}
+el('refresh').onclick=()=>act();
+el('run').onclick=()=>act('mod_controls_sync');
+el('pause').onclick=()=>act('set_sync_paused',{paused:!state.paused});
+async function connect(){
+  try{
+    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.7.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
+    theme(host.hostContext);send({method:'ui/notifications/initialized',params:{}});
+    new ResizeObserver(()=>send({method:'ui/notifications/size-changed',params:{height:document.querySelector('main').offsetHeight}})).observe(document.querySelector('main'));
+    working=false;await act();
+  }catch(e){el('notice').textContent=e.message;working=false;el('refresh').disabled=false;el('refresh').onclick=()=>{el('refresh').disabled=true;connect().then(()=>{if(state)el('refresh').onclick=()=>act()})}}
+}
+connect();
+</script></body></html>
