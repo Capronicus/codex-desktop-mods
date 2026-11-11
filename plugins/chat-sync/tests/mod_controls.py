@@ -80,6 +80,9 @@ class ModControls(unittest.TestCase):
         folder.mkdir()
         device = a.tool("configure_chat_sync", folder=str(folder), automatic=False)["device"]
         a.tool("name_sync_device", name="Home")
+        a.tool("set_sync_device_label", name="Home", emoji="🏠")
+        with self.assertRaisesRegex(ValueError, "one emoji"):
+            a.tool("set_sync_device_label", name="Home", emoji="Home!")
         private = a.chat()
         a.tool("set_local_only", kind="chat", ident=private, enabled=True)
         a.tool("set_sync_paused", paused=True)
@@ -94,6 +97,7 @@ class ModControls(unittest.TestCase):
         self.assertEqual(a.tool("mod_controls_status")["privateChats"], [private])
         self.assertEqual(a.tool("configure_chat_sync", folder=str(folder), automatic=False)["device"], device)
         self.assertEqual(a.tool("mod_controls_status")["device"], "Home")
+        self.assertEqual(a.tool("mod_controls_status")["deviceEmoji"], "🏠")
         self.assertEqual(a.tool("mod_controls_sync")["exported"], 1)
         s = a.tool("mod_controls_status")
         self.assertEqual(s["receipts"], {"saved": 1, "local_only": 1})
@@ -106,6 +110,18 @@ class ModControls(unittest.TestCase):
         s = a.tool("mod_controls_status")
         self.assertEqual(s["peers"], [{"name": "Work", "received": 1}])
         self.assertEqual(s["receipts"]["received"], 1)
+        origin = b.tool("chat_delivery_status", thread=public)["origin"]
+        self.assertEqual((origin["name"], origin["emoji"], origin["basis"]), ("Home", "🏠", "first_seen"))
+        a.tool("set_sync_device_label", name="Workshop", emoji="👩🏽‍💻")
+        self.assertEqual(a.tool("chat_delivery_status", thread=public)["origin"]["emoji"], "👩🏽‍💻")
+        a.tool("mod_controls_sync")
+        b.tool("mod_controls_sync")
+        self.assertEqual(b.tool("chat_delivery_status", thread=public)["origin"]["emoji"], "👩🏽‍💻")
+        a.tool("set_sync_device_label", name="Home", emoji="")
+        a.tool("mod_controls_sync")
+        b.tool("mod_controls_sync")
+        self.assertEqual(b.tool("chat_delivery_status", thread=public)["origin"]["emoji"], "")
+        s = a.tool("mod_controls_status")
         folder.rename(root / "offline")
         with self.assertRaisesRegex(ValueError, "unavailable"):
             a.tool("mod_controls_sync")

@@ -9,11 +9,19 @@ button{background:var(--color-background-secondary,ButtonFace);color:inherit;bor
 button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid Highlight;outline-offset:3px}p{margin:6px 0 12px}.actions{justify-content:flex-start;flex-wrap:wrap;margin-top:16px}
 .row{padding:8px 0;border-top:1px solid color-mix(in srgb,currentColor 13%,transparent);cursor:pointer}.row input{flex:none;width:32px;height:19px;appearance:none;border:1px solid GrayText;border-radius:12px;position:relative;cursor:pointer;color:GrayText}.row input:before{content:"";position:absolute;border-radius:50%;width:11px;height:11px;background:currentColor;top:3px;left:3px}.row input:checked{background:Highlight;color:HighlightText;border-color:Highlight}.row input:checked:before{left:16px}.row input:disabled{opacity:.45;cursor:default}
 dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0}dt,.hint{color:var(--color-text-secondary,GrayText)}dd{margin:0;overflow-wrap:anywhere}summary{cursor:pointer}details{margin-top:12px}#rules{white-space:pre-line;overflow-wrap:anywhere}#notice:not(:empty){padding:10px;border:1px solid currentColor;border-radius:8px;margin:12px 0}ul{padding-inline-start:22px}#overview{font-weight:650}button[hidden],[hidden]{display:none!important}@media(max-width:400px){dl{grid-template-columns:1fr;gap:0}dd{margin-bottom:5px}}
+#device-form{display:flex;align-items:end;gap:12px;flex-wrap:wrap;padding:8px 0}#device-form label{display:grid;gap:4px}
+#device-form input{box-sizing:border-box;background:Canvas;color:CanvasText;border:1px solid GrayText;border-radius:6px;padding:6px 9px;font:inherit;max-width:100%}#emoji{width:6rem}
 </style></head><body><main>
 <div class="head"><h1>Mod Controls</h1><button id="refresh" disabled>Refresh</button></div>
 <p id="notice" role="status" aria-live="polite">Connecting to Chat Sync…</p>
 <section><h2>Chat sync</h2><p id="overview"></p><p id="setup" hidden>To connect this desktop, ask Chat Sync to use a private folder you choose.</p>
 <dl id="health"></dl><p id="delivery"></p><ul id="peers" hidden></ul>
+<details id="device-settings" hidden><summary>Device name and emoji</summary>
+<div id="device-form"><label>Device name<input id="device-name" required maxlength="60" autocomplete="off"></label>
+<label>Origin emoji<input id="emoji" list="device-emojis" placeholder="Optional" autocomplete="off"></label>
+<datalist id="device-emojis"><option value="🏠">Home</option><option value="💼">Work</option><option value="💻">Laptop</option><option value="🖥️">Desktop</option></datalist>
+<button id="save-device" type="button">Save device</button></div>
+<p class="hint">Choose or paste an emoji to show the chat’s origin in Desktop Mods 0.10 or later. Clear it to hide the label. Other desktops receive changes on sync.</p></details>
 <details id="sharing" hidden><summary>Sharing options and local-only rules</summary><div id="options"></div><p id="rules"></p></details>
 <div class="actions"><button id="run" disabled>Sync now</button><button id="pause" disabled>Pause sync</button></div></section>
 <section id="integrity" hidden><h2>Sync folder health</h2>
@@ -76,7 +84,7 @@ function render(){
   el('overview').textContent=!s.configured?'Disconnected':s.paused?'Sync paused':!s.available?'Folder unavailable':s.automatic?'Automatic sync on':'Manual sync';
   el('setup').hidden=s.configured;el('health').replaceChildren();
   if(s.configured){
-    field('This desktop',s.device);field('Private folder',s.folder+(s.available?'':' (unavailable)'));
+    field('This desktop',[s.deviceEmoji,s.device].filter(Boolean).join(' '));field('Private folder',s.folder+(s.available?'':' (unavailable)'));
     const date=v=>v?new Date(v*1000).toLocaleString():'No record yet';
     field('Last attempt',date(h.attempt));field('Last full success',date(h.success));
     if(h.outcome) field('Last result',({completed:'Completed',partial:'Some items are pending',failed:'Failed',started:'Started · no completion recorded'})[h.outcome]);
@@ -86,6 +94,13 @@ function render(){
   el('peers').replaceChildren();el('peers').hidden=!s.peers.length;
   for(const p of s.peers){const li=document.createElement('li');li.textContent=p.name+' received '+p.received;el('peers').append(li)}
   el('sharing').hidden=!s.configured&&!s.privateChats.length&&!s.privateProjects.length;
+  el('device-settings').hidden=!s.configured;
+  const deviceValues=JSON.stringify([s.folder,s.device,s.deviceEmoji]);
+  if(el('device-form').dataset.saved!==deviceValues){
+    el('device-form').dataset.saved=deviceValues;
+    el('device-name').value=s.device||'';el('emoji').value=s.deviceEmoji||'';
+  }
+  el('save-device').disabled=working||!s.configured;
   el('options').hidden=!s.configured;
   el('rules').textContent=['Local-only chats: '+(s.privateChats.join(', ')||'None'),'Local-only projects: '+(s.privateProjects.join(', ')||'None')].join('\n');
   el('run').disabled=working||!s.configured||s.paused||!s.available;
@@ -133,11 +148,20 @@ async function act(tool,args={},message=''){
 el('refresh').onclick=()=>act();
 el('run').onclick=()=>act('mod_controls_sync');
 el('pause').onclick=()=>act('set_sync_paused',{paused:!state.paused});
+el('save-device').onclick=()=>{
+  if(!el('device-name').reportValidity())return;
+  act('set_sync_device_label',{name:el('device-name').value.trim(),emoji:el('emoji').value.trim()},'Device label saved.');
+};
+el('device-form').onkeydown=event=>{
+  if(event.key==='Enter'&&!event.isComposing&&event.target.tagName==='INPUT'){
+    event.preventDefault();el('save-device').click();
+  }
+};
 el('check').onclick=()=>act('check_sync_folder');
 el('repair').onclick=()=>act('repair_sync_folder');
 async function connect(){
   try{
-    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.8.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
+    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.9.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
     theme(host.hostContext);send({method:'ui/notifications/initialized',params:{}});
     new ResizeObserver(()=>send({method:'ui/notifications/size-changed',params:{height:document.querySelector('main').offsetHeight}})).observe(document.querySelector('main'));
     working=false;await act();

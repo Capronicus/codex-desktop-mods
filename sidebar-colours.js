@@ -14,7 +14,7 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
   const sectionStore = 'sidebar-custom-sections-v3';
   const ownerAttr = 'data-csc-owner';
   const hex = /^#[0-9a-f]{6}$/i;
-  let rules, dialog;
+  let rules, dialog, activeAccount;
   const bridge = window.localChatDetails?.colours;
   let stored = new Map(), inheritedLinks = [], version = null, queue = Promise.resolve();
   const portableKey = /^(project|section|chat|override-project|override-section|swatch)\/[A-Za-z0-9:_@.-]{1,256}$/;
@@ -22,6 +22,8 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     const next = queue.then(async () => {
       const snapshot = await bridge(mode, entries, version);
       if (snapshot) {
+        if(activeAccount!==snapshot.account && dialog?.open)dialog.close();
+        activeAccount=snapshot.account;
         version = snapshot.version;
         stored = new Map(snapshot.entries);
         inheritedLinks = snapshot.inherited;
@@ -50,7 +52,7 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
       const supported = entries.filter(([id]) => portableKey.test(id));
       if (supported.length) await exchange(mode, supported);
     }
-    for (const [id,value] of entries) if(!bridge || mode!=='finish' || !id.startsWith('chat/')) setPreference(prefix + id, value ?? undefined);
+    for (const [id,value] of entries) if(!bridge || (!/^(?:override-)?section\//.test(id) && (mode!=='finish' || !id.startsWith('chat/')))) setPreference(prefix + id, value ?? undefined);
     refresh();
   }
   function poll() {
@@ -137,6 +139,7 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
   function read(kind, id) {
     if (!id) return null;
     const name = kind + '/' + id;
+    if(bridge && (kind==='section' || kind==='override-section'))return stored.get(name)??null;
     return stored.has(name) ? stored.get(name) : getPreference(prefix + name, null);
   }
   function colourKeys() {
@@ -150,7 +153,9 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
 
   function sections() {
     const settings = getPreference(sectionStore, {}) || {};
-    return Object.values(settings).flatMap(account => Array.isArray(account?.sections) ? account.sections : []);
+    const keys=Object.keys(settings);
+    const id=bridge ? activeAccount : keys.length===1 ? keys[0] : null;
+    return id && Array.isArray(settings[id]?.sections) ? settings[id].sections : [];
   }
   function sectionChatKey(key) {
     return typeof key === 'string' ? key.replace(/^codex:thread:/, '') : null;
@@ -374,7 +379,9 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     error.setAttribute('role', 'alert');
     const setting = kind + '/' + savedId();
     const force = 'override-' + setting;
+    const openedAccount=activeAccount;
     async function change(entries,mode) {
+      if(bridge && openedAccount!==activeAccount)return false;
       try { await write(entries,mode); error.textContent = ''; return true; }
       catch { error.textContent = 'Could not save the colour in this profile.'; return false; }
     }
@@ -606,17 +613,37 @@ function installDeliveryStatus() {
   if (!read) return;
   const style=document.createElement('style');
   style.textContent=`
+    [data-csc-chat-label][data-origin-emoji]::before {content:attr(data-origin-emoji) ' ';font:1em system-ui}
+    [data-csc-origin-caption]::before {content:attr(data-csc-origin-caption);display:block;font:12px/1.5 system-ui;
+      color:var(--color-text-secondary,GrayText);padding:2px 4px}
     [data-csc-delivery] [data-csc-chat-label]::after {content:attr(data-sync-mark);font-size:.78em;margin-inline-start:.4em;opacity:0}
     [data-csc-delivery]:is(:hover,:focus-within) [data-csc-chat-label]::after,
     [data-csc-delivery="busy"] [data-csc-chat-label]::after,
     [data-csc-delivery="conflict"] [data-csc-chat-label]::after {opacity:.8}
   `;
   document.head.append(style);
-  let busy=false;
+  let busy=false, again=false;
+  const selector='[data-thread-user-message-navigation-content]';
+  function openChats(){
+    const views=new Map();
+    for(const content of document.querySelectorAll(selector)){
+      const id=content.querySelector('[data-csc-origin-thread]')?.dataset.cscOriginThread;
+      if(!id || id!==content.dataset.cscActiveThread)continue;
+      let pane=content,footer;
+      while(pane && pane.querySelectorAll(selector).length<=1){
+        footer=pane.querySelector('[data-pip-obstacle="thread-footer"]');
+        if(footer)break;
+        pane=pane.parentElement;
+      }
+      views.set(footer||content,id);
+    }
+    return views;
+  }
   const names={saved:'Saved to sync folder',busy:'Waiting for this chat to close',conflict:'Two desktops edited this chat',
     local_only:'Kept on this device',waiting:'Waiting for sync files'};
   async function update(){
-    if (document.hidden || busy) return;
+    if (document.hidden) return;
+    if (busy){again=true;return}
     busy=true;
     try {
       const rows=new Map();
@@ -624,12 +651,29 @@ function installDeliveryStatus() {
         const id=/^(?:codex:thread:)?local:([a-f0-9-]{36})$/.exec(row.getAttribute('data-csc-chat-key'))?.[1];
         if (id){if (!rows.has(id)) rows.set(id,[]);rows.get(id).push(row);}
       }
-      const ids=[...rows.keys()];
+      const views=openChats();
+      for(const node of document.querySelectorAll('[data-csc-origin-owner]')){
+        if(views.get(node)!==node.dataset.cscOriginOwner){
+          delete node.dataset.cscOriginCaption;delete node.dataset.cscOriginOwner;
+        }
+      }
+      const ids=[...new Set([...views.values(),...rows.keys()])];
       for(let n=0;n<ids.length;n+=128){
         const batch=ids.slice(n,n+128), records=await read(batch);
-        for (const id of batch) for (const row of rows.get(id)){
+        for(const [node,id] of views){
+          if(!batch.includes(id) || !node.isConnected || again)continue;
+          const o=records[id]?.origin;
+          if(o?.emoji && ['started','first_seen'].includes(o.basis)){
+            node.dataset.cscOriginOwner=id;
+            node.dataset.cscOriginCaption=o.emoji+' '+(o.basis==='started'?'Started on ':'First seen on ')+o.name;
+          }else{delete node.dataset.cscOriginOwner;delete node.dataset.cscOriginCaption}
+        }
+        for (const id of batch) for (const row of rows.get(id)||[]){
+          if(!row.getAttribute('data-csc-chat-key')?.endsWith('local:'+id))continue;
           const label=row.querySelector('[data-csc-chat-label]');if(!label)continue;
           const r=records[id];
+          if(r?.origin?.emoji)label.dataset.originEmoji=r.origin.emoji;
+          else delete label.dataset.originEmoji;
           if(!r){if(row.hasAttribute('data-csc-delivery')){row.removeAttribute('data-csc-delivery');label.removeAttribute('data-sync-mark');if(label.title===label.dataset.syncTitle)label.removeAttribute('title');delete label.dataset.syncTitle;}continue;}
           const received=(r.received_by||[]).map(p=>p.name), waiting=(r.waiting_on||[]).map(p=>p.name);
           const origin=r.origin ? (r.origin.basis==='started'?'Started on ':'First seen on ')+r.origin.name : null;
@@ -639,8 +683,9 @@ function installDeliveryStatus() {
           label.title=message;label.dataset.syncTitle=message;
         }
       }
-    } finally {busy=false;}
+    } finally {busy=false;if(again){again=false;queueMicrotask(refresh)}}
   }
   const refresh=()=>update().catch(()=>{});
-  window.setInterval(refresh,5000);window.addEventListener('focus',refresh);refresh();
+  window.setInterval(refresh,5000);window.addEventListener('focus',refresh);
+  window.addEventListener('csc-chat-origin-changed',()=>queueMicrotask(refresh));refresh();
 }

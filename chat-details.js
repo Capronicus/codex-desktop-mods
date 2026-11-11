@@ -82,12 +82,40 @@ function ChatDetailLine({entry,role,React,jsx}) {
   return jsx.jsxs('div',{'data-local-chat-detail':role,style:{...chatDetailStyle,textAlign:user?'end':'start'},children:[text[0],text[1]?' · ':null,text[1]]});
 }
 
+const originPanes = new Set();
+let originScheduled = false;
+function markOriginThread(node) {
+  const chat = node?.closest('[data-thread-user-message-navigation-content]');
+  if (chat) originPanes.add(chat);
+  if (originScheduled) return;
+  originScheduled = true;
+  queueMicrotask(() => {
+    originScheduled = false;
+    let changed = false;
+    for (const pane of originPanes) {
+      const id = pane.isConnected && pane.querySelector('[data-csc-origin-thread]')?.dataset.cscOriginThread;
+      if (!id) {
+        delete pane.dataset.cscActiveThread;
+        originPanes.delete(pane);
+        changed = true;
+      } else if (pane.dataset.cscActiveThread !== id) {
+        pane.dataset.cscActiveThread = id;
+        changed = true;
+      }
+    }
+    if (changed) window.dispatchEvent(new Event('csc-chat-origin-changed'));
+  });
+}
+
 function withChatDetails(entry, row, React, jsx) {
   const visuals = window.localChatDetails?.visuals;
-  if (visuals?.timestamps === false && visuals?.tokens === false) return row;
   if (!entry.turnId || !entry.conversationId || entry.liveVoiceSource || entry.type) return row;
   const type=entry.transcriptBlock?.type;
   if(type && type!=='user-message' && type!=='assistant-message')return row;
   const line=role=>role==='user' && visuals?.timestamps===false ? null : jsx.jsx(ChatDetailLine,{entry,role,React,jsx},role);
-  return jsx.jsxs(jsx.Fragment,{children:[(!type || type==='user-message')&&line('user'),row,(!type || type==='assistant-message')&&line('assistant')]});
+  const marker=(!entry.hostId || entry.hostId==='local') && jsx.jsx('span',{
+    hidden:true,'data-csc-origin-thread':entry.conversationId,ref:markOriginThread
+  },'origin');
+  const details=visuals?.timestamps!==false || visuals?.tokens!==false;
+  return jsx.jsxs(jsx.Fragment,{children:[marker,details&&(!type || type==='user-message')&&line('user'),row,details&&(!type || type==='assistant-message')&&line('assistant')]});
 }

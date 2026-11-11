@@ -44,6 +44,7 @@ def status():
     rules = cfg or sync.read_json(sync.STATE / "disconnected.json", {}).get("exclusions", {})
     return {
         "configured": bool(device), "device": delivery.label(cfg) if device else None,
+        "deviceEmoji": cfg.get("device_emoji", ""),
         "folder": folder, "available": bool(folder and (Path(folder) / "codex-chat-sync-v1").is_dir()),
         "paused": bool(cfg.get("paused")), "automatic": bool(cfg.get("automatic")),
         "options": {k: bool(cfg.get(k)) for k in ("colours", "settings", "sidebar", "order")},

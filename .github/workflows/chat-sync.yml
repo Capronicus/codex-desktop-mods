@@ -2,7 +2,7 @@ name: Chat sync across Linux and Windows
 on:
   workflow_dispatch:
   push:
-    branches: [main, codex/chat-sync, codex/sidebar-palette, codex/sidebar-sync, codex/chat-controls, codex/mod-controls, codex/sync-repair]
+    branches: [main, codex/chat-sync, codex/sidebar-palette, codex/sidebar-sync, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/sync-repair]
     paths:
       - '.agents/plugins/marketplace.json'
       - '.github/workflows/chat-sync.yml'
@@ -17,6 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: npm install -g @openai/codex@0.167.0-alpha.3.2
       - run: python3 plugins/chat-sync/tests/sync_controls.py
+      - run: python3 plugins/chat-sync/tests/account_colours.py
       - run: python3 plugins/chat-sync/tests/mod_controls.py
       - run: python3 plugins/chat-sync/tests/integrity_test.py
       - run: python3 plugins/chat-sync/tests/sidebar_layout_test.py
@@ -52,6 +53,7 @@ jobs:
           name: synthetic-linux-history
           path: ${{ runner.temp }}/transfer
       - run: python plugins/chat-sync/tests/sync_controls.py
+      - run: python plugins/chat-sync/tests/account_colours.py
       - run: python plugins/chat-sync/tests/mod_controls.py
       - run: python plugins/chat-sync/tests/integrity_test.py
       - run: python plugins/chat-sync/tests/sidebar_layout_test.py

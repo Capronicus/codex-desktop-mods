@@ -167,6 +167,14 @@
   }
 
   let colours;
+  function colourAccount() {
+    try {
+      const id=JSON.parse(require('node:fs').readFileSync(path.join(home,'auth.json'),'utf8')).tokens?.account_id;
+      return typeof id==='string'?id:'';
+    } catch {return '';}
+  }
+  const sectionKey = key => /^(?:override-)?section\//.test(key);
+  let migratedScope;
   function colourDB() {
     if (colours) return colours;
     const {DatabaseSync} = require('node:sqlite');
@@ -207,8 +215,9 @@
     }
     if (kind==='project') projects.add(id);
     else {
-      for(const account of Object.values(state['electron-persisted-atom-state']?.['sidebar-custom-sections-v3'] || {}))
-        for(const sec of account?.sections || []) if(sec.id===id){
+      const account=colourAccount();
+      const bucket=account && state['electron-persisted-atom-state']?.['sidebar-custom-sections-v3']?.[account];
+      for(const sec of bucket?.sections || []) if(sec.id===id){
           if(sec.hostSectionIds?.local)sections.add(sec.hostSectionIds.local);
           for(const key of sec.itemKeys || [])addItem(key);
         }
@@ -246,15 +255,34 @@
         !['read','seed','write','finish'].includes(mode) || !Array.isArray(entries) || entries.length > (mode==='finish' ? 250000 : 512) ||
         (mode === 'read' && entries.length) || !entries.every(validEdit)) throw new Error('Invalid colour preference request');
     const db = colourDB();
-    if (entries.length) {
+    const account=colourAccount();
+    const scope='@'+(account?require('node:crypto').createHash('sha256').update(account).digest('hex'):'signed-out')+'/';
+    const dbKey = key => sectionKey(key) ? scope+key : key;
+    if((mode==='write'||mode==='finish') && previous?.startsWith('@') && !previous.startsWith(scope))
+      throw Error('The active account changed. Reopen the colour picker.');
+    if (entries.length || migratedScope!==scope) {
       db.exec('BEGIN IMMEDIATE');
       try {
+        let eligible=new Set();
+        if(account && (migratedScope!==scope || mode==='seed' && entries.some(([k])=>sectionKey(k)))){
+          let buckets={};
+          try{buckets=JSON.parse(require('node:fs').readFileSync(path.join(home,'.codex-global-state.json'),'utf8'))['electron-persisted-atom-state']?.['sidebar-custom-sections-v3']||{};}
+          catch(error){if(error.code!=='ENOENT')throw error;}
+          eligible=new Set((buckets[account]?.sections||[]).map(s=>s.id));
+          for(const [id,data] of Object.entries(buckets))if(id!==account)
+            for(const s of data?.sections||[])eligible.delete(s.id);
+          const copy=db.prepare('INSERT OR IGNORE INTO colours VALUES (?,?,?,?)');
+          const legacy=db.prepare("SELECT * FROM colours WHERE key GLOB 'section/*' OR key GLOB 'override-section/*'").all();
+          const claimed=new Set(db.prepare("SELECT key FROM colours WHERE key GLOB '@*/*'").all().map(r=>r.key.slice(r.key.indexOf('/')+1)));
+          for(const r of legacy)if(eligible.has(r.key.split('/')[1]) && !claimed.has(r.key))copy.run(scope+r.key,r.value,r.rev,r.author);
+          if(mode==='seed')entries=entries.filter(([k])=>!sectionKey(k)||eligible.has(k.split('/')[1])&&!claimed.has(k));
+        }else if(mode==='seed')entries=entries.filter(([k])=>!sectionKey(k));
         if(mode==='finish'){
           const force=entries.find(([k,v])=>k.startsWith('override-') && v===null)?.[0];
           const group=force?.slice(9);
           const get=db.prepare('SELECT value FROM colours WHERE key=?');
-          if(!group || get.get(force)?.value!=='on')throw Error('Group override changed while saving');
-          const colour=get.get(group)?.value;
+          if(!group || get.get(dbKey(force))?.value!=='on')throw Error('Group override changed while saving');
+          const colour=get.get(dbKey(group))?.value;
           if (!entries.every(([k,v])=>(k.startsWith('chat/') && v===colour) || (k===force && v===null) || (k===group && v===null)))
             throw Error('Group colour changed while saving');
         }
@@ -262,15 +290,29 @@
         const rev = mode === 'seed' ? 0 : db.prepare('SELECT COALESCE(MAX(rev),0)+1 AS next FROM colours').get().next;
         const upsert = db.prepare(mode === 'seed' ? 'INSERT OR IGNORE INTO colours VALUES (?,?,?,?)' :
           'INSERT OR REPLACE INTO colours VALUES (?,?,?,?)');
-        for (const [key,value] of entries) upsert.run(key,value,rev,author);
+        for (const [key,value] of entries) upsert.run(dbKey(key),value,rev,author);
         db.exec('COMMIT');
+        migratedScope=scope;
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     }
-    const version = db.prepare('PRAGMA data_version').get().data_version + ':' +
+    const version = scope + db.prepare('PRAGMA data_version').get().data_version + ':' +
       db.prepare('SELECT total_changes() AS n').get().n;
     if (previous === version) return null;
-    return {version, entries:db.prepare('SELECT key,value FROM colours').all().map(r=>[r.key,r.value]),
-      inherited:db.prepare('SELECT chat,project,section FROM inherited').all()};
+    const rows=[];
+    for(const {key,value} of db.prepare('SELECT key,value FROM colours').all()){
+      if(key.startsWith(scope))rows.push([key.slice(scope.length),value]);
+      else if(!key.startsWith('@') && !sectionKey(key))rows.push([key,value]);
+    }
+    const hints=new Map();
+    for(const {chat,project,section} of db.prepare('SELECT chat,project,section FROM inherited').all()){
+      const scoped=chat.startsWith(scope);
+      if(scoped ? !section : chat.startsWith('@') || !project)continue;
+      const id=scoped?chat.slice(scope.length):chat;
+      const hint=hints.get(id)||{chat:id,project:null,section:null};
+      if(scoped)hint.section=section;else hint.project=project;
+      hints.set(id,hint);
+    }
+    return {version,account,entries:rows,inherited:[...hints.values()]};
   });
 
   let receiptCache;

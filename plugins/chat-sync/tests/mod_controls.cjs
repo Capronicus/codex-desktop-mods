@@ -61,6 +61,11 @@ async function run() {
     await request('tools/call', {name:'configure_chat_sync', arguments:{folder, automatic:false}});
     await panel.getByRole('button', {name:'Refresh'}).click();
     await panel.getByText('Manual sync', {exact:true}).waitFor();
+    await panel.getByText('Device name and emoji',{exact:true}).click();
+    await panel.getByLabel('Device name',{exact:true}).fill('Work');
+    await panel.getByLabel('Origin emoji').fill('💼');
+    await panel.getByRole('button',{name:'Save device'}).click();
+    await panel.getByText('💼 Work',{exact:true}).waitFor();
     await panel.getByRole('button', {name:'Check folder'}).click();
     await panel.getByText(/No shared chat revisions to check/).waitFor();
     await panel.getByRole('button', {name:'Pause sync'}).click();

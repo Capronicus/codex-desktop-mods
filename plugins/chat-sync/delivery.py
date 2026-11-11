@@ -1,7 +1,16 @@
 """Exchange receipts for verified history revisions. Device labels are user-editable."""
 
 import platform
+import re
 import sync
+
+# Accept a single symbol, flag or joined emoji, including skin tones and keycaps.
+_SYMBOL = r"[\U0001F000-\U0001F1E5\U0001F200-\U0001F3FA\U0001F400-\U0001FAFF\u2300-\u23FF\u2600-\u27BF\u2194-\u2199\u21A9\u21AA\u24C2\u25AA-\u25FE\u2934\u2935\u2B05-\u2B07\u2B1B\u2B1C\u2B50\u2B55\u00A9\u00AE\u203C\u2049\u2122\u2139\u3030\u303D\u3297\u3299]\uFE0F?[\U0001F3FB-\U0001F3FF]?"
+_EMOJI = re.compile(r"(?:[\U0001F1E6-\U0001F1FF]{2}|[0-9#*]\uFE0F?\u20E3|\U0001F3F4[\U000E0061-\U000E007A]+\U000E007F|" + _SYMBOL + r"(?:\u200D" + _SYMBOL + r")*)")
+
+
+def valid_emoji(value):
+    return isinstance(value, str) and len(value) <= 32 and bool(_EMOJI.fullmatch(value))
 
 
 def revision(man):
@@ -18,17 +27,30 @@ def label(cfg):
     return cfg.get("device_name") or (platform.system() + " PC " + cfg["device"][:4])
 
 
-def set_name(name):
+def set_name(name, emoji=None):
     name = name.strip()
     if not name or len(name) > 60 or not name.isprintable():
         raise ValueError("Choose a readable device name of at most 60 characters.")
+    if emoji is not None and emoji != "" and not valid_emoji(emoji):
+        raise ValueError("Choose one emoji, or clear the field to remove it.")
     import projects
 
     with sync.lock(sync.STATE / "sync.lock"):
         cfg, _ = projects.config()
         cfg["device_name"] = name
+        if emoji is not None:
+            cfg["device_emoji"] = emoji
         sync.atomic(sync.CONFIG, sync.encode(cfg))
-    return {"device_name": name}
+        # Update this desktop even when automatic transfers are paused.
+        path = sync.STATE / "delivery.json"
+        doc = sync.read_json(path, {})
+        if doc.get("device") == cfg["device"]:
+            for row in doc.get("chats", {}).values():
+                origin = row.get("origin")
+                if origin and origin["device"] == cfg["device"]:
+                    origin.update(name=name, emoji=cfg.get("device_emoji", ""))
+            save(path, doc)
+    return {"device_name": name, "device_emoji": cfg.get("device_emoji", "")}
 
 
 def exchange(vault, cfg, heads, accepted, busy, stats, state, private, visible, origins):
@@ -49,6 +71,7 @@ def exchange(vault, cfg, heads, accepted, busy, stats, state, private, visible, 
     own = {
         "v": 1,
         "name": label(cfg),
+        "emoji": cfg.get("device_emoji", ""),
         "received": ack,
         "busy": waiting,
         "origins": {tid: basis for tid, basis in origins.items() if tid not in private},
@@ -76,7 +99,8 @@ def exchange(vault, cfg, heads, accepted, busy, stats, state, private, visible, 
             for tid, basis in observed.items():
                 if isinstance(basis, str) and basis in ("started", "first_seen", "preexisting"):
                     claims.setdefault(tid, []).append(
-                        {"device": device, "name": doc["name"][:60], "basis": basis}
+                        {"device": device, "name": doc["name"][:60], "basis": basis,
+                         "emoji": doc["emoji"] if valid_emoji(doc.get("emoji")) else ""}
                     )
     result = {}
     for tid in visible | busy | set(stats["conflicts"]):

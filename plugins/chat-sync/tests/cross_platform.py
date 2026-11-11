@@ -47,9 +47,9 @@ def plugin(app):
     })["contents"][0]
     assert ui["mimeType"] == "text/html;profile=mcp-app" and "ui/initialize" in ui["text"]
 
-    def call(name, **args):
+    def call(tool_name, **args):
         result = app.call("mcpServer/tool/call", {
-            "threadId": tid, "server": "chat-sync", "tool": name, "arguments": args,
+            "threadId": tid, "server": "chat-sync", "tool": tool_name, "arguments": args,
         })
         assert not result.get("isError"), result
         return json.loads(result["content"][0]["text"])
@@ -127,6 +127,9 @@ def exercise(stage, vault, incoming, home):
         assert call("chat_sync_status")["configured"] is False
         assert not (home / "chat-sync/config.json").exists()
         call("configure_chat_sync", folder=str(vault), automatic=False)
+        if stage in ("seed", "reply"):
+            name, emoji = ("Home", "🏠") if stage == "seed" else ("Work", "💼")
+            call("set_sync_device_label", name=name, emoji=emoji)
         assert call("check_sync_folder")["damaged"] == 0
         assert (home / "chat-sync/config.json").is_file()
         assert call("chat_sync_status")["colours"] is False
@@ -226,6 +229,8 @@ def exercise(stage, vault, incoming, home):
         assert FIRST in turns and SECOND in turns and "Birch metadata verified." in turns
         assert WINDOWS_CHAT in history(app, find_chat(app, WINDOWS_CHAT))
         print("Verified original ID, both Linux and Windows turns, and Windows-origin chat.")
+        for chat_id, emoji in ((tid,"🏠"), (find_chat(app, WINDOWS_CHAT),"💼")):
+            assert call("chat_delivery_status", thread=chat_id)["origin"]["emoji"] == emoji
 
 
 def main():

@@ -46,11 +46,19 @@ def valid(row):
     )
 
 
-def memberships(state, colours, index):
+def section_key(key):
+    return key.startswith(("section/", "override-section/"))
+
+
+def account_prefix(account):
+    return "@" + sync.digest(account.encode()) + "/" if account else ""
+
+
+def memberships(layout, colours, index):
     # Read sidebar membership locally. The shared file contains only IDs of
     # chats and colour groups, including memberships of collapsed projects.
-    projects = state.get("local-projects", {})
-    sections = state.get("electron-persisted-atom-state", {}).get("sidebar-custom-sections-v3", {})
+    state = layout.data
+    projects = layout.projects
     legacy = {}
     for host, aliases in state.get(
         "app-server-project-id-by-legacy-project-id-by-host", {}
@@ -74,16 +82,15 @@ def memberships(state, colours, index):
         owner = next((g for g in (linked, group, old) if g and "project/" + g in colours), None)
         if owner:
             links["local:" + tid] = [owner, None]
-    for account in sections.values():
-        for section in account.get("sections", []) if isinstance(account, dict) else []:
-            sid = section.get("id")
-            if not isinstance(sid, str) or "section/" + sid not in colours:
-                continue
-            for key in section.get("itemKeys", []):
-                if isinstance(key, str):
-                    chat = key.removeprefix("codex:thread:")
-                    if ID.fullmatch(chat):
-                        links.setdefault(chat, [None, None])[1] = sid
+    for section in layout.sections if layout.account else []:
+        sid = section.get("id")
+        if not isinstance(sid, str) or "section/" + sid not in colours:
+            continue
+        for key in section.get("itemKeys", []):
+            if isinstance(key, str):
+                chat = key.removeprefix("codex:thread:")
+                if ID.fullmatch(chat):
+                    links.setdefault(chat, [None, None])[1] = sid
     return links
 
 
@@ -109,7 +116,9 @@ class GroupIds:
                 self.own_backing[k] = cloud
                 self.backing[self.links.wire(k)] = cloud
         mapped = sync.read_json(home / "chat-sync/sidebar-section-ids.json", {}).get("aliases", {})
-        self.sections = {v: k for k, v in {**mapped, **layout.section_ids}.items()}
+        active_ids = {s["id"] for s in layout.sections if s.get("id")} if layout.account else set()
+        self.sections = {v: k for k, v in mapped.items() if k in active_ids}
+        self.sections.update({v: k for k, v in layout.section_ids.items()})
         self.project_keys = {}
         for k in local:
             self.project_keys.setdefault(self.group("project", k), set()).add(k)
@@ -145,7 +154,7 @@ class GroupIds:
         return self.links.local(min(ids)) if ids and not value.startswith("g-p-") else value
 
 
-def read_peers(directory, device):
+def read_peers(directory, device, sections=False):
     peers, deferred = [], []
     for file in sorted(directory.glob("*.json")):
         if not UUID.fullmatch(file.stem) or file.stem == device:
@@ -173,6 +182,13 @@ def read_peers(directory, device):
                 for k, v in doc.get("project_backing", {}).items()
             ):
                 raise ValueError("Invalid project backing")
+            doc["entries"] = [row for row in doc["entries"] if section_key(row[0]) == sections]
+            doc["members"] = {
+                chat: [None, s] if sections else [p, None]
+                for chat, (p, s) in doc["members"].items() if (s if sections else p)
+            }
+            if sections:
+                doc["project_backing"] = {}
             peers.append(doc)
         except (ValueError, KeyError, TypeError, AttributeError, OSError):
             deferred.append(file.stem)
@@ -183,6 +199,12 @@ def exchange(home, vault, device, index, atomic, encode, sharing=None):
     directory = vault / "colours-v1"
     peers, deferred = read_peers(directory, device)
     layout = desktop_layout.Layout(home)
+    scope = account_prefix(layout.account)
+    scoped_directory = directory / "sections" / scope[1:-1] if scope else None
+    scoped_deferred = []
+    if scoped_directory:
+        scoped_peers, scoped_deferred = read_peers(scoped_directory, device, sections=True)
+        peers.extend(scoped_peers)
     ids = GroupIds(home, vault, layout, peers)
     private_groups = (
         {ids.group("project", k) for k in sharing.private_projects} if sharing else set()
@@ -203,16 +225,39 @@ def exchange(home, vault, device, index, atomic, encode, sharing=None):
         for k, v in layout.data.get("electron-persisted-atom-state", {}).items()
         if k.startswith(prefix)
     ]
+    # Legacy section rows have no owner. Adopt only IDs exclusive to the active
+    # account, and only once; a later switch must not claim the same old value.
+    accounts = layout.data.get("electron-persisted-atom-state", {}).get(desktop_layout.SECTIONS, {})
+    owned = {s["id"] for s in layout.sections if s.get("id")} if scope else set()
+    for account, data in accounts.items():
+        if account != layout.account and isinstance(data, dict):
+            owned.difference_update(s.get("id") for s in data.get("sections", []))
     with closing(sqlite3.connect(home / "sidebar-colours.sqlite", timeout=3)) as db:
         db.executescript(SCHEMA)
         with db:
             db.execute("BEGIN IMMEDIATE")
             db.executemany(
-                "INSERT OR IGNORE INTO colours VALUES (?,?,?,?)", (r for r in legacy if valid(r))
+                "INSERT OR IGNORE INTO colours VALUES (?,?,?,?)",
+                (r for r in legacy if valid(r) and (not section_key(r[0]) or r[0].split("/")[1] in owned))
             )
-            local = {
-                r[0]: r for r in db.execute("SELECT key,value,rev,author FROM colours") if valid(r)
-            }
+            all_rows = list(db.execute("SELECT key,value,rev,author FROM colours"))
+            claimed = {k.split("/", 1)[1] for k, *_ in all_rows if k.startswith("@") and "/" in k}
+            local = {}
+            for key, value, rev, author in all_rows:
+                if section_key(key):
+                    if key.split("/")[1] not in owned or key in claimed:
+                        continue
+                    if valid((key, value, rev, author)):
+                        db.execute("INSERT INTO colours VALUES (?,?,?,?)", (scope+key, value, rev, author))
+                elif key.startswith("@"):
+                    if not scope or not key.startswith(scope):
+                        continue
+                    key = key[len(scope):]
+                    if not section_key(key):
+                        continue
+                row = (key, value, rev, author)
+                if valid(row):
+                    local[key] = row
             rows, aliases = {}, {}
 
             def merge(row):
@@ -230,7 +275,7 @@ def exchange(home, vault, device, index, atomic, encode, sharing=None):
                 for row in peer["entries"]:
                     merge(row)
             edits = [
-                (k, value, rev, author)
+                (scope+k if section_key(k) else k, value, rev, author)
                 for wire, value, rev, author in rows.values()
                 for k in ids.local_keys(wire) | aliases.get(wire, set())
                 if local.get(k) != (k, value, rev, author)
@@ -244,7 +289,7 @@ def exchange(home, vault, device, index, atomic, encode, sharing=None):
         }
         own = {
             chat: [ids.group("project", p), ids.group("section", s)]
-            for chat, (p, s) in memberships(layout.data, active, index).items()
+            for chat, (p, s) in memberships(layout, active, index).items()
             if allowed("chat/" + chat) and ids.group("project", p) not in private_groups
         }
         hints = {}
@@ -261,29 +306,39 @@ def exchange(home, vault, device, index, atomic, encode, sharing=None):
                         current[i] = group
         hints = {k: v for k, v in hints.items() if any(v)}
         old = {k: [p, s] for k, p, s in db.execute("SELECT chat,project,section FROM inherited")}
-        if not deferred and hints != old:
+        desired = {k: v for k, v in old.items() if k.startswith("@") and not (scope and k.startswith(scope))}
+        for k, (p, s) in old.items():
+            if deferred and not k.startswith("@") and p:
+                desired[k] = [p, None]
+            if scoped_deferred and scope and k.startswith(scope) and s:
+                desired[k] = [None, s]
+        for chat, (p, s) in hints.items():
+            if p:
+                desired[chat] = [p, None]
+            if s and scope:
+                desired[scope+chat] = [None, s]
+        if desired != old:
             with db:
                 db.execute("DELETE FROM inherited")
-                db.executemany(
-                    "INSERT INTO inherited VALUES (?,?,?)",
-                    ((k, *pair) for k, pair in hints.items()),
-                )
-    head = directory / (device + ".json")
+                db.executemany("INSERT INTO inherited VALUES (?,?,?)", ((k, *pair) for k, pair in desired.items()))
     backing = {
         k: v
         for k, v in ids.own_backing.items()
         if allowed("project/" + k) and "project/" + v in rows
     }
-    content = encode(
-        {
+    for dest, sections in ((directory, False), (scoped_directory, True)):
+        if dest is None:
+            continue
+        content = encode({
             "version": 1,
-            "entries": [rows[k] for k in sorted(rows)],
-            "members": own,
-            "project_backing": backing,
-        }
-    )
-    if not head.is_file() or head.read_bytes() != content:
-        atomic(head, content)
+            "entries": [rows[k] for k in sorted(rows) if section_key(k) == sections],
+            "members": {chat: [None, s] if sections else [p, None]
+                        for chat, (p, s) in own.items() if (s if sections else p)},
+            "project_backing": {} if sections else backing,
+        })
+        head = dest / (device + ".json")
+        if not head.is_file() or head.read_bytes() != content:
+            atomic(head, content)
     return {
         "preferences": len(rows),
         "active": sum(r[1] is not None for r in rows.values()),
@@ -291,5 +346,5 @@ def exchange(home, vault, device, index, atomic, encode, sharing=None):
             k.startswith("swatch/") and r[1] is not None for k, r in rows.items()
         ),
         "received": len(edits),
-        "deferred_devices": deferred,
+        "deferred_devices": sorted(set(deferred + scoped_deferred)),
     }

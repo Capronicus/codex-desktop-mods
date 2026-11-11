@@ -43,6 +43,7 @@ async function probe(url) {
     assert.equal(parents[thread], parent);
     const receipt=await evaluate(`window.localChatDetails.delivery(["${thread}"])`);
     assert.equal(receipt[thread]?.received_by[0].name,'Linux QA');
+    assert.equal(receipt[thread]?.origin.emoji,'💼');
     console.log('Verified real Windows timestamp, token, fork and chat delivery IPC.');
     const project = 'document.querySelector(\'[data-app-action-sidebar-project-label="Windows QA"]\')';
     for (let i = 0; i < 45 && !await evaluate(`!!${project}`); i++) await wait(700);
