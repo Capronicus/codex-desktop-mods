@@ -113,9 +113,9 @@ def adapt(role, source, files, pet_assets):
         body = replace(body,r'("edit-project",icon:\w+\.edit,message:\w+\.edit,onSelect:\w+\},)',
                        r'\1csc.menuItem("project",cscId),')
     elif role == 'linkedmenu':
-        header = r'([\w$]+)=\(0,r\.c\)\((\d+)\),\{align:'
-        memo, slots = re.search(header, body).groups()
-        body = replace(body, header, f'cscId=e.cscProjectId,{memo}=(0,r.c)({int(slots)+1}),{{align:')
+        memo_header = r'([\w$]+)=\(0,r\.c\)\((\d+)\),\{align:'
+        memo, slots = re.search(memo_header, body).groups()
+        body = replace(body, memo_header, f'cscId=e.cscProjectId,{memo}=(0,r.c)({int(slots)+1}),{{align:')
         body = replace(body, re.escape(memo)+r'\[16\]!==t\)\{(let [\w,]+;)if\(n=\[\{id:(\w+),message:V',
                        lambda m: f'{memo}[16]!==t||{memo}[{slots}]!==cscId){{{m[1]}{memo}[{slots}]=cscId;'
                        f'if(n=[...cscId?[csc.menuItem("project",cscId)]:[],{{id:{m[2]},message:V')
