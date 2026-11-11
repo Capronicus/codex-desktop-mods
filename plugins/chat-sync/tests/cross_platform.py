@@ -127,6 +127,7 @@ def exercise(stage, vault, incoming, home):
         assert call("chat_sync_status")["configured"] is False
         assert not (home / "chat-sync/config.json").exists()
         call("configure_chat_sync", folder=str(vault), automatic=False)
+        assert call("check_sync_folder")["damaged"] == 0
         assert (home / "chat-sync/config.json").is_file()
         assert call("chat_sync_status")["colours"] is False
         assert call("set_colour_sync", enabled=True)["colours"] is True

@@ -6,6 +6,7 @@ import subprocess
 import time
 import sync
 import projects, delivery, batches
+import integrity
 
 
 def main():
@@ -16,6 +17,8 @@ def main():
     setup.add_argument("folder")
     setup.add_argument("--automatic", action="store_true")
     sub.add_parser("sync")
+    sub.add_parser("check-folder")
+    sub.add_parser("repair-folder")
     sub.add_parser("sync-colours")
     sub.add_parser("sync-settings")
     sub.add_parser("settings").add_argument("mode", choices=("on", "off"))
@@ -101,6 +104,8 @@ def main():
             result = sync.sync_settings_now()
         elif args.command == "sync-colours":
             result = sync.sync_colours_now()
+        elif args.command in ("check-folder", "repair-folder"):
+            result = integrity.inspect_folder(repair=args.command == "repair-folder")
         elif args.command == "sync":
             result = sync.run()
         else:
