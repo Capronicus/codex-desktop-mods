@@ -2,7 +2,7 @@ name: Chat sync across Linux and Windows
 on:
   workflow_dispatch:
   push:
-    branches: [main, codex/chat-sync, codex/sidebar-palette, codex/sidebar-sync, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/sync-repair, codex/pet-controls]
+    branches: [main, codex/chat-sync, codex/sidebar-palette, codex/sidebar-sync, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/sync-repair, codex/pet-controls, codex/defer-busy-recovery]
     paths:
       - '.agents/plugins/marketplace.json'
       - '.github/workflows/chat-sync.yml'

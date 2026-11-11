@@ -569,12 +569,21 @@ def replace_history(temp, dest, tid, diverged):
     journal.unlink(missing_ok=True)
 
 
+def recover_projection(journal):
+    with native_writer(journal.name), invalidate_projection(journal.name):
+        pass
+    journal.unlink(missing_ok=True)
+
+
 def recover_projections():
+    busy = set()
     for journal in (STATE / "pending-projection").glob("*"):
         if UUID.fullmatch(journal.name):
-            with native_writer(journal.name), invalidate_projection(journal.name):
-                pass
-            journal.unlink(missing_ok=True)
+            try:
+                recover_projection(journal)
+            except Busy:
+                busy.add(journal.name)
+    return busy
 
 
 def materialize(vault, man, local, cwd=None, checkout=None):
@@ -694,7 +703,7 @@ def run(automatic=False):
         if not vault.is_dir():
             raise ValueError("Sync folder unavailable. Check the mount or desktop sync client.")
         device = cfg["device"]
-        recover_projections()
+        busy = recover_projections()
         state_path = STATE / ("state-" + device + ".json")
         state = read_json(state_path, {})
         index = catalog()
@@ -703,6 +712,7 @@ def run(automatic=False):
         projects.publish_links(cfg, vault)
         sharing = projects.Sharing(cfg, vault, index, HOME)
         private = sharing.private_chats
+        busy.difference_update(private)
         if "origin_since" not in cfg:
             cfg["origin_since"] = time.time()
             atomic(CONFIG, encode(cfg))
@@ -714,7 +724,6 @@ def run(automatic=False):
             p.stem for p in (vault / "heads").glob("*/*.json") if p.parent.name != device
         }
         accepted = set()
-        busy = set()
         checkouts = read_json(STATE / ("checkouts-" + device + ".json"), {})
         local_files = streams()
         snapshots = {}
@@ -723,7 +732,6 @@ def run(automatic=False):
             "exported": 0,
             "imported": 0,
             "updated": 0,
-            "busy": 0,
             "conflicts": {},
             "skipped": {},
             "pending_names": 0,
@@ -731,7 +739,7 @@ def run(automatic=False):
         # A missing cloud block or delayed head can always be retried. Local files
         # are only replaced after the complete incoming snapshot has been verified.
         for tid, entry in local_files.items():
-            if tid in private:
+            if tid in private or tid in busy:
                 continue
             row = index.get(tid)
             if not entry or (
@@ -769,7 +777,6 @@ def run(automatic=False):
                     state[tid] = snap
             except Busy:
                 busy.add(tid)
-                stats["busy"] += 1
             except (
                 OSError,
                 ValueError,
@@ -782,7 +789,7 @@ def run(automatic=False):
             atomic(origin_path, encode(origins))
         heads = shared_heads(vault, stats["skipped"])
         for tid, copies in heads.items():
-            if tid in private:
+            if tid in private or tid in busy:
                 continue
             try:
                 if tid in stats["skipped"] or (tid in local_files and tid not in snapshots):
@@ -830,7 +837,6 @@ def run(automatic=False):
                 stats["updated" if current else "imported"] += 1
             except Busy:
                 busy.add(tid)
-                stats["busy"] += 1
             except (
                 OSError,
                 ValueError,
@@ -839,12 +845,14 @@ def run(automatic=False):
                 sqlite3.Error,
             ) as exc:
                 stats["skipped"][tid] = str(exc)
+        stats["busy"] = len(busy)
         atomic(state_path, encode(state))
         delivery.save(STATE / ("checkouts-" + device + ".json"), checkouts)
         pending = {
             tid: s["pending_name"]
             for tid, s in state.items()
             if tid not in private
+            and tid not in busy
             and s.get("pending_name")
             and (tid in local_files or "token" not in s)
         }
@@ -986,7 +994,9 @@ def adopt_history(tid, device):
         if not cfg or cfg["device"] == device:
             raise ValueError("Select a different device from this chat’s conflict report.")
         require_active(cfg)
-        recover_projections()
+        journal = STATE / "pending-projection" / tid
+        if journal.is_file():
+            recover_projection(journal)
         vault = Path(cfg["folder"]) / "codex-chat-sync-v1"
         import projects
 
