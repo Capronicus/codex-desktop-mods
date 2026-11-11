@@ -1,4 +1,5 @@
 """Exercise the panel's real MCP server with isolated profiles and a synthetic private folder."""
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -18,7 +19,7 @@ class Client:
         directory = self.home / "thread-writer-locks"
         directory.mkdir(parents=True)
         (directory / ".coordination.lock").touch()
-        with sqlite3.connect(self.home / "state_5.sqlite") as db:
+        with closing(sqlite3.connect(self.home / "state_5.sqlite")) as db, db:
             db.execute("create table threads(id, rollout_path, name, archived, source, cwd)")
         self.proc = subprocess.Popen([sys.executable, str(SERVER)], stdin=-1, stdout=-1,
                                      env={**os.environ, "CODEX_HOME": str(self.home)}, text=True)
