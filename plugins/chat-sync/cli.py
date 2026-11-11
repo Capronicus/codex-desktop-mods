@@ -39,6 +39,8 @@ def main():
         "undo": [],
     }.items():
         command_parser = sub.add_parser(command)
+        if command == "name":
+            command_parser.add_argument("--emoji", help="One origin emoji, or an empty string to remove it")
         for field in fields:
             command_parser.add_argument(field)
     privacy = sub.add_parser("local-only")

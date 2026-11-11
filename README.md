@@ -25,6 +25,8 @@ codex plugin add codex-desktop-mods@capronicus-desktop-mods
 
 ## Mod Controls
 
+Open **Chat sync → Device name and emoji** on each connected desktop. For example, set **🏠 Home** on one and **💼 Work** on the other. After sync, Desktop Mods 0.10.0 shows the origin emoji in the sidebar and the device name by the chat composer. Older histories can show **First seen on** when the original device is uncertain. Referenced local files still live on the computer where you saved them.
+
 If a chat stays stuck during transfer, open **Sync folder health → Check folder**. For missing or damaged blocks, choose **Repair from this desktop** on a computer with a complete copy. Let your folder client finish, then check again on the receiving desktop.
 
 Install **Codex Chat Sync** from the same marketplace, then open **Mod Controls** in the desktop sidebar. You can also ask Chat Sync to **Open Mod Controls**. The panel shows the last sync attempt, the last full success, and how many current chat revisions another desktop has acknowledged. **Pause sync** preserves the device name, sharing choices and local-only rules.

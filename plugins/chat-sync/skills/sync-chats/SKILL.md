@@ -17,7 +17,7 @@ For project and custom section sync, use set_sidebar_sync on a configured deskto
 
 Use list_sync_projects to identify both IDs before link_sync_project. Ask which existing local checkout to use if it is unknown. Linking is explicit. Equal project names alone do not choose a pair. Run sync on each participating device. The folder path belongs to the receiving device.
 
-For “did my other PC receive this chat?”, call chat_delivery_status with the local thread UUID. A receipt identifies the last verified revision. “Saved” means the revision reached the local sync folder. The receiving desktop must run sync and the folder service must bring its receipt back. Use name_sync_device for a user-chosen label such as Home or Work. Report the origin from chat_delivery_status when present, keeping “started” distinct from “first seen”. Desktop Mods 0.7.0 shows the same status on sidebar hover.
+For “did my other PC receive this chat?”, call chat_delivery_status with the local thread UUID. A receipt identifies the last verified revision. “Saved” means the revision reached the local sync folder. The receiving desktop must run sync and the folder service must bring its receipt back. Use set_sync_device_label for a name and origin emoji. Pass an empty emoji when the user asks to clear it. Use name_sync_device for a user-chosen label such as Home or Work. Report the origin from chat_delivery_status when present, keeping “started” distinct from “first seen”. Desktop Mods 0.7.0 shows the same status on sidebar hover.
 
 For “keep this chat/project on this device”, use set_local_only with kind, UUID and enabled. Report previously_shared and the effect on future passes. Earlier copies remain available wherever they were saved. Enable sharing again only when requested.
 

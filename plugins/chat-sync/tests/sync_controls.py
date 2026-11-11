@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT.parent))
 import sync
 import projects
 import delivery
+import colours
 import batches
 import desktop_layout
 
@@ -196,7 +197,8 @@ def run():
                 with closing(sqlite3.connect(dst / "sidebar-colours.sqlite")) as db:
                     imported = dict(db.execute("SELECT key,value FROM colours"))
                     for key, value in expected.items():
-                        assert imported[key.replace("/" + p, "/" + local)] == value, (key, imported)
+                        db_key = colours.account_prefix(ACCOUNT) + key if colours.section_key(key) else key.replace("/" + p, "/" + local)
+                        assert imported[db_key] == value, (key, imported)
                     db.execute(
                         "UPDATE colours SET value=NULL,rev=10 WHERE key IN (?,?)",
                         ("swatch/12ab34", "project/" + local),

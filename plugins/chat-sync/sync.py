@@ -140,6 +140,7 @@ def status():
         "sidebar": bool(cfg and cfg.get("sidebar")),
         "order": bool(cfg and cfg.get("order")),
         "device_name": cfg and cfg.get("device_name"),
+        "device_emoji": cfg and cfg.get("device_emoji", ""),
         "sidebar_preview": {k: preview[k] for k in ("id", "counts") if k in preview} or None,
         "sidebar_layout_pending": bool(
             cfg and cfg.get("sidebar") and (STATE / "sidebar-layout-pending.json").is_file()
@@ -211,7 +212,7 @@ def disable():
         if cfg:
             saved = read_json(STATE / "disconnected.json", {})
             saved.setdefault("devices", {})[cfg["folder"]] = {
-                k: cfg[k] for k in ("device", "device_name", "origin_since", "project_links") if k in cfg
+                k: cfg[k] for k in ("device", "device_name", "device_emoji", "origin_since", "project_links") if k in cfg
             }
             saved["exclusions"] = {k: cfg.get(k, []) for k in ("private_chats", "private_projects")}
             atomic(STATE / "disconnected.json", encode(saved))

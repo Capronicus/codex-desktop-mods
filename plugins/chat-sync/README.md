@@ -13,6 +13,8 @@ The installed plugin folder contains `sync.py`. Run `python3 /path/to/sync.py st
 
 ## Mod Controls
 
+In **Device name and emoji**, choose a name and an optional emoji for this desktop. The CLI equivalent is `python3 sync.py name Work --emoji "💼"`. Clear the emoji to hide the origin label. After both desktops sync, Desktop Mods 0.10.0 shows it beside the chat title and above the composer. **Started on** identifies a recorded origin. **First seen on** identifies the first desktop to share an older chat. Ambiguous origins get no badge. Local file paths still refer to their original computer.
+
 **Mod Controls** opens from the desktop sidebar or by asking Chat Sync to open it. It shows the private folder, last attempt, last full success and delivery receipts. **Pause sync** suspends automatic and manual transfers on this computer. **Resume sync** restores the previous schedule. The CLI also accepts `pause` and `resume`. Disconnecting retains local-only rules for future connections and restores the same device identity when you reconnect the same folder.
 
 **Sync folder health** verifies the blocks used by current device revisions. **Check folder** saves the result on this computer and works while sync is paused. **Repair from this desktop** restores matching blocks from eligible local histories, including compressed archives. The CLI equivalents are `python3 sync.py check-folder` and `python3 sync.py repair-folder`. If blocks are still missing, run repair on another desktop that has the chat and wait for your folder client to transfer them. Missing revision metadata and unreadable files are reported separately.
@@ -66,6 +68,8 @@ Automatic chat sync includes these preferences when enabled. For a settings-only
 ## Sync sidebar colours
 
 Apply **Codex Desktop Mods 0.7.0** and install **Chat Sync 0.4.0** or later on each computer. After configuring the same private folder, ask **Enable colour sync and sync my colours now** on each device. This exchanges colour preferences immediately, including existing saved swatches. From the CLI, use `python3 sync.py colours on` and `python3 sync.py sync-colours`. Use `colours off` to disable it. Colour sharing starts off on existing and new installations.
+
+Chat Sync 0.9.0 sends custom section colours, overrides and memberships in a separate file for the signed-in account. Update Chat Sync and Desktop Mods on both computers for section colours. Existing section colours migrate when the desktop can identify their owner. If two accounts used the same section ID, choose its colour once in each account. Older copies already transferred by a folder provider may remain in its history.
 
 The same sync pass carries individual, project and section colours, saved swatches, group overrides and resets. Matching IDs and explicitly linked local projects share settings across desktops. A chat can inherit its original project or section colour through its ID even when it appears only in Recents on the other desktop. Independently created groups with the same name keep separate IDs. The receiving mod refreshes within five seconds while visible. Concurrent edits to different swatches or chats coexist. Simultaneous edits to the same setting use a revision and device ID to select a consistent value.
 
