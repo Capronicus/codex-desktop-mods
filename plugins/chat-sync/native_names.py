@@ -89,7 +89,7 @@ def native_api(home):
             deadline.cancel()
 
     try:
-        call("initialize", {"clientInfo": {"name": "chat_sync", "version": "0.10.0"},
+        call("initialize", {"clientInfo": {"name": "chat_sync", "version": "0.11.0"},
                             "capabilities": {"experimentalApi": True}})
         yield call
     finally:

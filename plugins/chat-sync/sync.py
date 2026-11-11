@@ -19,6 +19,7 @@ import zlib
 import workspace_paths
 
 BLOCK = 1024 * 1024
+LOCAL_SOURCES = ("cli", "vscode", "appServer", "app_server")
 HEX = re.compile(r"[0-9a-f]{64}")
 UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 FILE = re.compile(
@@ -240,7 +241,7 @@ def set_paused(paused):
     return {"paused": paused}
 
 
-def catalog():
+def catalog(include_titles=False):
     db = HOME / "state_5.sqlite"
     if not db.is_file():
         raise ValueError("This profile has no supported local Codex thread catalogue.")
@@ -248,8 +249,11 @@ def catalog():
     with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as conn:
         conn.row_factory = sqlite3.Row
         columns = "id, rollout_path, name, archived, source, cwd"
-        if any(info[1] == "project_id" for info in conn.execute("PRAGMA table_info(threads)")):
+        available = {info[1] for info in conn.execute("PRAGMA table_info(threads)")}
+        if "project_id" in available:
             columns += ", project_id"
+        if include_titles and "title" in available:
+            columns += ", title"
         for row in conn.execute("SELECT " + columns + " FROM threads"):
             if not UUID.fullmatch(row["id"]):
                 continue
@@ -344,7 +348,7 @@ def stage_rollout(tid, path, st, staged):
         info = meta.get("payload") if isinstance(meta, dict) else None
         if not isinstance(info, dict) or meta.get("type") != "session_meta" or info.get("id") != tid:
             raise ValueError("Thread identity differs from filename")
-        if info.get("source") not in ("cli", "vscode", "appServer", "app_server", None):
+        if info.get("source") is not None and info["source"] not in LOCAL_SOURCES:
             return None
         staged.write(first)
         for part in records:
@@ -377,10 +381,21 @@ def stage_rollout(tid, path, st, staged):
     return info, meta.get("timestamp"), size
 
 
+def export_name(row, previous):
+    if previous.get("pending_name"):
+        return previous["pending_name"]
+    return row["name"] if row else previous.get("manifest", {}).get("name")
+
+
+def snapshot_token(entry, st, name):
+    path, archived = entry
+    return [str(path), st.st_size, st.st_mtime_ns, st.st_ino, name, archived]
+
+
 def snapshot(vault, tid, entry, name, known):
     path, archived = entry
     st = path.stat()
-    token = [str(path), st.st_size, st.st_mtime_ns, st.st_ino, name, archived]
+    token = snapshot_token(entry, st, name)
     if known and known.get("token") == token:
         return known
     with tempfile.SpooledTemporaryFile(max_size=BLOCK, dir=STATE) as staged:
@@ -742,14 +757,10 @@ def run(automatic=False):
             if tid in private or tid in busy:
                 continue
             row = index.get(tid)
-            if not entry or (
-                row and row["source"] not in ("cli", "vscode", "appServer", "app_server")
-            ):
+            if not entry or (row and row["source"] not in LOCAL_SOURCES):
                 continue
             prev = state.get(tid, {})
-            name = row["name"] if row else prev.get("manifest", {}).get("name")
-            if prev.get("pending_name"):
-                name = prev["pending_name"]
+            name = export_name(row, prev)
             try:
                 snap = snapshot(vault, tid, entry, name, prev)
                 if snap:
@@ -866,7 +877,7 @@ def run(automatic=False):
         stats["unavailable_local"] = sum(
             tid not in local_files
             for tid, row in index.items()
-            if row["source"] in ("cli", "vscode", "appServer", "app_server")
+            if row["source"] in LOCAL_SOURCES
         )
         delivery.exchange(
             vault,

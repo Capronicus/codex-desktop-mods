@@ -5,6 +5,8 @@ description: Sync local Codex conversations across desktop profiles using a user
 
 For “Open Mod Controls”, call open_mod_controls. Use set_sync_paused when the user asks to pause or resume transfers. The panel shows last-attempt and receipt information and controls this computer’s visual settings. Fully reopen the patched desktop app to apply appearance switches.
 
+For “which chats would this desktop share?”, use preview_chat_sharing on the configured desktop. Search by title or UUID, or page through the results. It works while paused. Describe “needs checking” entries as candidates whose source or recovery state sync still has to verify. In Mod Controls, **Preview outgoing chats** also lets the user change individual local-only rules.
+
 In Mod Controls, **Sidebar changes** lets the user preview incoming changes, apply the displayed batch or undo the latest batch locally. Undo also works while transfers are paused. If the panel reports queued changes, fully quit and reopen the desktop to see the result.
 
 For a stuck transfer, use check_sync_folder to check the current shared revisions. When asked to repair, use repair_sync_folder on a connected, unpaused desktop with a local copy. Report blocks restored and what still needs another desktop or a folder download.

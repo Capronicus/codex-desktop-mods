@@ -51,6 +51,54 @@ class Client:
 
 
 class ModControls(unittest.TestCase):
+    def test_outgoing_preview(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with closing(Client(root, "Home")) as a:
+                with self.assertRaisesRegex(ValueError, "Configure"):
+                    a.tool("preview_chat_sharing")
+                self.assertFalse((a.home / "chat-sync").exists())
+                folder = root / "shared"
+                folder.mkdir()
+                a.tool("configure_chat_sync", folder=str(folder), automatic=False)
+                a.tool("set_sync_paused", paused=True)
+                ids = [a.chat() for _ in range(27)]
+                excluded, unknown, duplicate, unsupported = [a.chat() for _ in range(4)]
+                missing = str(uuid.uuid4())
+                archive = a.home / "archived_sessions"
+                (archive / ("rollout-2026-11-07T12-00-00-" + duplicate + ".jsonl")).touch()
+                with closing(sqlite3.connect(a.home / "state_5.sqlite")) as db, db:
+                    db.execute("ALTER TABLE threads ADD title TEXT")
+                    db.executemany("INSERT INTO threads(id,title,source) VALUES(?,?,?)",
+                                   [(tid, f"Fixture {i:02d}", "cli") for i, tid in enumerate(ids)]
+                                   + [(unsupported, "Automation fixture", "subagent"), (missing, "Missing", "vscode")])
+                a.tool("set_local_only", kind="chat", ident=excluded, enabled=True)
+                vault = folder / "codex-chat-sync-v1"
+                local = a.home / "chat-sync"
+                before = {p.name: p.read_bytes() for p in local.iterdir() if p.is_file()}
+                result = a.tool("preview_chat_sharing")
+                self.assertEqual(result["counts"], {"pending":27,"check":1,"excluded":1,"unavailable":2,"unchanged":0})
+                self.assertEqual(len(result["chats"]), 25)
+                last = a.tool("preview_chat_sharing", search="FIXTURE", group="pending", page=999)
+                self.assertEqual([r["name"] for r in last["chats"]], ["Fixture 25", "Fixture 26"])
+                self.assertEqual(last["page"], 1)
+                for tid, reason in [(excluded, "chat_rule"), (unknown, "unindexed"), (duplicate, "multiple_files"), (missing, "missing_file")]:
+                    row, = a.tool("preview_chat_sharing", search=tid)["chats"]
+                    self.assertEqual(row["reason"], reason)
+                self.assertEqual(a.tool("preview_chat_sharing", search=unsupported)["matched"], 0)
+                self.assertEqual(before, {p.name:p.read_bytes() for p in local.iterdir() if p.is_file()})
+                self.assertFalse(list(vault.iterdir()))
+                a.tool("set_sync_paused", paused=False)
+                self.assertEqual(a.tool("sync_chats")["exported"], 28)
+                self.assertEqual(a.tool("preview_chat_sharing",group="unchanged")["matched"], 28)
+                with next(archive.glob("*" + ids[0] + ".jsonl")).open("ab") as stream:
+                    stream.write(b'{"type":"event_msg","payload":{"type":"task_complete"}}\n')
+                self.assertEqual(a.tool("preview_chat_sharing",search=ids[0])["chats"][0]["reason"], "changed")
+                vault.rename(root / "offline")
+                with self.assertRaisesRegex(ValueError, "unavailable"):
+                    a.tool("preview_chat_sharing")
+                self.assertFalse(vault.exists())
+
     def test_controls(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

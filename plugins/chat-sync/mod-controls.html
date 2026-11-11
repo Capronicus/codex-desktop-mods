@@ -14,6 +14,10 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 #change-list{list-style:none;margin:0;padding:0;overflow-wrap:anywhere}
 #change-list li{border-top:1px solid color-mix(in srgb,currentColor 13%,transparent);padding:8px 0}
 #change-list li span{display:block;color:var(--color-text-secondary,GrayText)}
+#outgoing{border-top:1px solid color-mix(in srgb,currentColor 20%,transparent);margin-top:16px;padding-top:16px}
+#outgoing h3{font-size:16px;margin:0}#outgoing-filter{display:flex;align-items:end;gap:8px;flex-wrap:wrap}
+#outgoing-filter label{display:grid;gap:3px;min-width:0}#outgoing-filter input,#outgoing-filter select{font:inherit;max-width:100%;min-width:0;padding:5px;color:inherit;background:Canvas;border:1px solid GrayText;border-radius:6px}
+#outgoing-list{list-style:none;margin:0;padding:0}#outgoing-list li{border-top:1px solid color-mix(in srgb,currentColor 13%,transparent);display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0}#outgoing-list li div{min-width:0;overflow-wrap:anywhere}#outgoing-list small{display:block}#outgoing-list button{flex:none;font-size:13px;padding:4px 8px}
 </style></head><body><main>
 <div class="head"><h1>Mod Controls</h1><button id="refresh" disabled>Refresh</button></div>
 <p id="notice" role="status" aria-live="polite">Connecting to Chat Sync…</p>
@@ -26,7 +30,15 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 <button id="save-device" type="button">Save device</button></div>
 <p class="hint">Choose or paste an emoji to show the chat’s origin in Desktop Mods 0.10 or later. Clear it to hide the label. Other desktops receive changes on sync.</p></details>
 <details id="sharing" hidden><summary>Sharing options and local-only rules</summary><div id="options"></div><p id="rules"></p></details>
-<div class="actions"><button id="run" disabled>Sync now</button><button id="pause" disabled>Pause sync</button></div></section>
+<div class="actions"><button id="run" disabled>Sync now</button><button id="pause" disabled>Pause sync</button>
+<button id="preview-sharing" hidden disabled aria-expanded="false" aria-controls="outgoing">Preview outgoing chats</button></div>
+<div id="outgoing" hidden><h3>Outgoing chats</h3>
+<p class="hint">Shared histories include prompts, replies and saved tool output. This preview uses local file metadata. Sync checks each changed history and can defer a busy chat. Earlier copies stay where they were shared.</p>
+<div id="outgoing-filter" role="search" aria-label="Outgoing chats"><label><span id="outgoing-group-label">Chat status</span><select id="outgoing-group" aria-labelledby="outgoing-group-label"></select></label>
+<label>Chat title or ID<input id="outgoing-search" type="search" maxlength="256"></label><button type="button" id="outgoing-find">Search</button></div>
+<p id="outgoing-count" role="status"></p><ul id="outgoing-list"></ul>
+<div class="actions" id="outgoing-pages"><button id="outgoing-prev" type="button">Previous</button><button id="outgoing-next" type="button">Next</button></div>
+</div></section>
 <section id="sidebar-review" hidden><h2>Sidebar changes</h2>
 <p id="sidebar-status"></p>
 <div class="actions"><button id="preview-sidebar" disabled>Preview changes</button>
@@ -48,6 +60,10 @@ const options = {colours:['Colours and saved swatches','set_colour_sync'],settin
 const pending = new Map();
 let seq = 0, state, working = true;
 let preview=null, visibleChanges=25;
+let outgoing=null;
+const sharingGroups={all:'All local chats',pending:'New or changed',check:'Needs checking',unchanged:'No local changes',excluded:'Local-only',unavailable:'Unavailable'};
+const sharingReasons={new:'New on this desktop',changed:'Changed since last local snapshot',unchanged:'No local changes',unindexed:'Sync will check the source of this unindexed history',no_fingerprint:'Awaiting local snapshot check',recovery:'Awaiting recovery check',chat_rule:'Excluded by chat rule',project_rule:'Excluded by project rule',multiple_files:'Multiple local history files',missing_file:'History file missing',unreadable:'History file unavailable'};
+for(const [value,label] of Object.entries(sharingGroups))el('outgoing-group').add(new Option(label,value));
 function send(message){parent.postMessage({jsonrpc:'2.0',...message},'*')}
 function rpc(method,params){
   return new Promise((resolve,reject)=>{
@@ -139,10 +155,59 @@ function renderSidebar(s){
   el('apply-sidebar').hidden=n===0;
   el('apply-sidebar').disabled=working||!s.available||s.paused||undoQueued;
 }
+function sharingQuery(page){
+  return {group:el('outgoing-group').value,search:el('outgoing-search').value.trim(),page};
+}
+function previewSharing(page=0){
+  const query=sharingQuery(page);
+  act('preview_chat_sharing',query,result=>{outgoing=result;return ''});
+}
+function editChatRule(chat){
+  const enabled=chat.reason!=='chat_rule', query=sharingQuery(outgoing.page);
+  act('set_local_only',{kind:'chat',ident:chat.id,enabled},async result=>{
+    const message=enabled?'Chat marked local-only.':'Chat exclusion removed.';
+    try{outgoing=await call('preview_chat_sharing',query)}
+    catch(error){outgoing=null;return message+' '+error.message}
+    return message+(enabled&&result.previously_shared?' An earlier copy was already shared.':'');
+  });
+}
+function renderOutgoing(s){
+  const button=el('preview-sharing');
+  button.hidden=!s.configured;button.disabled=working||!s.available;
+  if(!s.configured||!s.available)outgoing=null;
+  button.textContent=outgoing?'Close preview':'Preview outgoing chats';
+  button.setAttribute('aria-expanded',String(!!outgoing));el('outgoing').hidden=!outgoing;
+  if(!outgoing){el('outgoing-list').replaceChildren();return}
+  const {counts,matched,page,pageSize,chats}=outgoing;
+  for(const option of el('outgoing-group').options){
+    const count=option.value==='all'?Object.values(counts).reduce((a,b)=>a+b,0):counts[option.value];
+    option.textContent=sharingGroups[option.value]+' ('+count+')';
+  }
+  const first=page*pageSize;
+  el('outgoing-count').textContent=matched?'Showing '+(first+1)+'–'+(first+chats.length)+' of '+matched:'No matching local chats.';
+  el('outgoing-pages').hidden=matched<=pageSize;
+  el('outgoing-prev').disabled=working||page===0;el('outgoing-next').disabled=working||first+chats.length>=matched;
+  el('outgoing-find').disabled=el('outgoing-group').disabled=el('outgoing-search').disabled=working;
+  el('outgoing-list').replaceChildren();
+  for(const chat of chats){
+    const li=document.createElement('li'),item=document.createElement('div'),detail=document.createElement('small');
+    item.textContent=chat.name||chat.id;item.title=chat.id;
+    detail.textContent=sharingReasons[chat.reason]+(chat.archived?' · Archived':'');
+    item.append(detail);li.append(item);
+    if(chat.reason!=='project_rule'){
+      const rule=document.createElement('button');
+      rule.textContent=chat.reason==='chat_rule'?'Remove chat rule':'Keep local';
+      rule.setAttribute('aria-label',rule.textContent+' · '+(chat.name||chat.id));
+      rule.disabled=working;rule.onclick=()=>editChatRule(chat);li.append(rule);
+    }
+    el('outgoing-list').append(li);
+  }
+}
 function render(){
   el('refresh').disabled=working;
   if(!state) return;
   const s=state,h=s.health,r=s.receipts;
+  renderOutgoing(s);
   renderSidebar(s);
   el('overview').textContent=!s.configured?'Disconnected':s.paused?'Sync paused':!s.available?'Folder unavailable':s.automatic?'Automatic sync on':'Manual sync';
   el('setup').hidden=s.configured;el('health').replaceChildren();
@@ -199,18 +264,30 @@ function render(){
 }
 async function act(tool,args={},message=''){
   if(working) return;
-  working=true;preview=null;render();el('notice').textContent=({mod_controls_sync:'Syncing…',check_sync_folder:'Checking shared chat revisions…',repair_sync_folder:'Verifying and restoring matching blocks…',preview_sidebar_sync:'Reading sidebar changes…',apply_sidebar_preview:'Applying reviewed changes…',undo_sidebar_batch:'Undoing the last batch…'})[tool]||'';
+  working=true;preview=null;if(tool!=='preview_chat_sharing'&&tool!=='set_local_only')outgoing=null;
+  render();el('notice').textContent=({mod_controls_sync:'Syncing…',preview_chat_sharing:'Reading local chat metadata…',check_sync_folder:'Checking shared chat revisions…',repair_sync_folder:'Verifying and restoring matching blocks…',preview_sidebar_sync:'Reading sidebar changes…',apply_sidebar_preview:'Applying reviewed changes…',undo_sidebar_batch:'Undoing the last batch…'})[tool]||'';
   try {
     const result=tool?await call(tool,args):null;
-    state=await call('mod_controls_status');el('notice').textContent=typeof message==='function'?message(result):message;
+    state=await call('mod_controls_status');el('notice').textContent=typeof message==='function'?await message(result):message;
   } catch(e){
-    el('notice').textContent=e.message;
+    outgoing=null;el('notice').textContent=e.message;
     if(tool) try{state=await call('mod_controls_status')}catch{}
   } finally{working=false;render()}
 }
 el('refresh').onclick=()=>act();
 el('run').onclick=()=>act('mod_controls_sync');
 el('pause').onclick=()=>act('set_sync_paused',{paused:!state.paused});
+el('preview-sharing').onclick=()=>{
+  if(outgoing){outgoing=null;renderOutgoing(state);return}
+  el('outgoing-group').value='all';el('outgoing-search').value='';previewSharing();
+};
+el('outgoing-find').onclick=()=>previewSharing();
+el('outgoing-search').onkeydown=event=>{
+  if(event.key==='Enter'&&!event.isComposing){event.preventDefault();previewSharing()}
+};
+el('outgoing-group').onchange=()=>previewSharing();
+el('outgoing-prev').onclick=()=>previewSharing(outgoing.page-1);
+el('outgoing-next').onclick=()=>previewSharing(outgoing.page+1);
 el('save-device').onclick=()=>{
   if(!el('device-name').reportValidity())return;
   act('set_sync_device_label',{name:el('device-name').value.trim(),emoji:el('emoji').value.trim()},'Device label saved.');
@@ -237,7 +314,7 @@ el('undo-sidebar').onclick=()=>act('undo_sidebar_batch',{batch:state.sidebarRevi
   result.undo_on_quit?'Fully quit the app to finish undoing the last sidebar batch.':'Sidebar restored. Project, section and order sync are off on this desktop.');
 async function connect(){
   try{
-    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.10.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
+    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.11.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
     theme(host.hostContext);send({method:'ui/notifications/initialized',params:{}});
     new ResizeObserver(()=>send({method:'ui/notifications/size-changed',params:{height:document.querySelector('main').offsetHeight}})).observe(document.querySelector('main'));
     working=false;await act();
