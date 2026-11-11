@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import windows_mods as mods
+from windows_plugin_discovery import install_and_check_servers
 
 
 def main():
@@ -78,9 +79,7 @@ def main():
         (archive/('rollout-legacy-'+thread+'.jsonl.zst')).write_bytes(compressed)
         host_env = {**os.environ, 'CODEX_HOME':str(home), 'CODEX_ELECTRON_USER_DATA_PATH':str(profile)}
         cli = pkg[0] / 'resources' / 'codex.exe'
-        repo = Path(__file__).resolve().parents[1]
-        for args in (['marketplace', 'add', str(repo)], ['add', 'chat-sync@capronicus-desktop-mods']):
-            subprocess.run([str(cli), 'plugin', *args], env=host_env, check=True)
+        install_and_check_servers(cli, home)
         # The debug endpoint exists only in this CI test. Production launches have no debug flags.
         args = subprocess.list2cmdline(['--user-data-dir=' + str(profile),
                                         '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0'])
