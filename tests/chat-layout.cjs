@@ -55,6 +55,30 @@ async function run() {
     await page.evaluate(() => window.stopTracking());
     assert.equal(await page.locator('style').count(), 1);
     console.log('Chat width, card clearance, scroll direction, idle, resize and navigation passed.');
+
+    await page.setContent(`<div data-turn-key="test">
+      <div data-local-chat-detail="user"><time></time></div>
+      <span class="group-hover/user-message:opacity-100"><span class="text-xs text-tertiary">Native user time</span></span>
+      <span class="group-hover/user-message:opacity-100"><button>Edit</button></span>
+      <span data-assistant-message-sent-time>Native assistant time</span>
+      <div data-local-chat-detail="assistant"><time></time></div>
+    </div>`);
+    await page.addScriptTag({path:path.join(__dirname, '..', 'chat-details.js')});
+    const visibility = await page.evaluate(() => {
+      const user = markTimestampRow('user'), assistant = markTimestampRow('assistant');
+      const visible = () => ['.text-xs','[data-assistant-message-sent-time]','button']
+        .map(selector => document.querySelector(selector).checkVisibility());
+      const initial = visible();
+      user(document.querySelector('[data-local-chat-detail="user"] time'));
+      assistant(document.querySelector('[data-local-chat-detail="assistant"] time'));
+      const mounted = visible();
+      user(null);
+      const userUnmounted = visible();
+      assistant(null);
+      return [initial,mounted,userUnmounted,visible()];
+    });
+    assert.deepEqual(visibility, [[true,true,true],[false,false,true],[true,false,true],[true,true,true]]);
+    console.log('Native timestamps restored when replacement times unmount, with message actions still visible.');
   } finally {
     await browser.close();
   }

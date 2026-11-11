@@ -6,12 +6,27 @@ const chatDetailNumber = new Intl.NumberFormat();
 const chatDetailStyle = {fontSize:'11px', lineHeight:'16px', color:'var(--color-text-secondary, GrayText)', marginBlock:'3px', fontVariantNumeric:'tabular-nums'};
 const chatDetailStyles=document.createElement('style');
 chatDetailStyles.textContent=`
-  [data-turn-key]:has(> [data-local-chat-detail="assistant"] time) [data-assistant-message-sent-time],
-  [data-turn-key]:has(> [data-local-chat-detail="user"] time) span[class*="group-hover/user-message:opacity-100"]:has(> span.text-xs.text-tertiary:only-child) {
+  [data-csc-assistant-time] [data-assistant-message-sent-time],
+  [data-csc-user-time] span[class*="group-hover/user-message:opacity-100"] > span.text-xs.text-tertiary:only-child {
     display:none;
   }
 `;
 document.head.append(chatDetailStyles);
+
+// Only the row with a mounted replacement time needs to hide its native time.
+// The virtual list frequently mounts and recycles rows during scrolling.
+function markTimestampRow(role) {
+  const attribute = 'data-csc-' + role + '-time';
+  let row;
+  return time => {
+    const parent = time?.parentElement?.parentElement;
+    const next = parent?.hasAttribute('data-turn-key') ? parent : null;
+    if (row === next) return;
+    row?.removeAttribute(attribute);
+    next?.setAttribute(attribute, '');
+    row = next;
+  };
+}
 
 function chatDetailStore(threadId) {
   let store=chatDetailStores.get(threadId);
@@ -61,6 +76,7 @@ function ChatDetailLine({entry,role,React,jsx}) {
   const subscribe=React.useMemo(()=>local&&thread&&id ? (notify=>chatDetailStore(thread).listen(id,notify)) : (()=>()=>{}),[local,thread,id]);
   const snapshot=React.useMemo(()=>()=>chatDetailStores.get(thread)?.get(id)??null,[thread,id]);
   const record=React.useSyncExternalStore(subscribe,snapshot);
+  const timeRef=React.useMemo(()=>markTimestampRow(role),[role]);
   const turn=entry.turn, block=entry.transcriptBlock;
   const user=role==='user';
   const finalBlock=!block || (block.type==='assistant-message' && block.item?.phase!=='commentary' &&
@@ -70,7 +86,7 @@ function ChatDetailLine({entry,role,React,jsx}) {
   const text=[];
   if(window.localChatDetails?.visuals?.timestamps !== false && Number.isFinite(stamp) && stamp>0) {
     const date=new Date(stamp);
-    if(Number.isFinite(date.getTime()))text.push(jsx.jsx('time',{dateTime:date.toISOString(),title:date.toLocaleString(),children:chatDetailDate.format(date)},'time'));
+    if(Number.isFinite(date.getTime()))text.push(jsx.jsx('time',{ref:timeRef,dateTime:date.toISOString(),title:date.toLocaleString(),children:chatDetailDate.format(date)},'time'));
   }
   const finished=record?.end || ['completed','interrupted','failed'].includes(entry.turnStatus??turn?.status);
   if(window.localChatDetails?.visuals?.tokens !== false && !user && finalBlock && finished && Number.isSafeInteger(record?.total)){
