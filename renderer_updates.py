@@ -94,22 +94,31 @@ def adapt(role, source, files, pet_assets):
             return 'dataAttributes:{...'+m[1]+',"data-csc-updated":'+stamp+fork+'}'
         body = replace(body, r'dataAttributes:(\w+\.rW\.sidebarThreadRow\(\{[^{}]*?title:([^{}]+?)\}\))', dated, 4)
     elif role == 'cloudsidebar':
-        body = replace(body, r'ref:eh,floatStatusIconsEnd:!0,revealActionsOnStatusHover:',
-                       'cscId:(L??Y)?"chatgpt:conversation:"+(L??Y):undefined,cscPending:Y?"chatgpt:conversation:"+Y:undefined,'
-                       'cscOwner:H??N?.gizmo_id,cscPinned:eM,cscUpdated:N?.update_time??N?.create_time??ev,'
-                       'ref:eh,floatStatusIconsEnd:!0,revealActionsOnStatusHover:')
-        body = replace(body, r'ref:eH,linkedLocalProjectId:', 'ref:eH,cscProjectId:ey,linkedLocalProjectId:')
-        body = replace(body, r'className:"flex flex-col gap-px",children:(?=\(0,\w+\.jsx\)\(\w+,\{animateContentResize:!0,expanded:\w+,contentKey:ey)',
-                       '"data-csc-project-group":ey,className:"flex flex-col gap-px",children:')
+        # These are bindings from the reviewed cloud row and project components.
+        if 'ref:ed,floatStatusIconsEnd:!0' in body:
+            thread, pending, owner, chat, pinned, recency, group = 'N', '$', 'z', 'M', 'eT', 'ef', 'eA'
+        else:
+            thread, pending, owner, chat, pinned, recency, group = 'L', 'Y', 'H', 'N', 'eM', 'ev', 'ey'
+        props = (f'cscId:({thread}??{pending})?"chatgpt:conversation:"+({thread}??{pending}):undefined,'
+                 f'cscPending:{pending}?"chatgpt:conversation:"+{pending}:undefined,'
+                 f'cscOwner:{owner}??{chat}?.gizmo_id,cscPinned:{pinned},'
+                 f'cscUpdated:{chat}?.update_time??{chat}?.create_time??{recency},')
+        body = replace(body, r'ref:\w+,floatStatusIconsEnd:!0,revealActionsOnStatusHover:', lambda m: props + m[0])
+        body = replace(body, r'(ref:\w+,)linkedLocalProjectId:', lambda m: m[1]+f'cscProjectId:{group},linkedLocalProjectId:')
+        body = replace(body, r'className:"flex flex-col gap-px",children:(?=\(0,\w+\.jsx\)\([\w.]+,\{animateContentResize:!0,expanded:\w+,contentKey:'+group+r'\b)',
+                       lambda m: f'"data-csc-project-group":{group},'+m[0])
     elif role == 'projectmenu':
         body = replace(body, r'(\w+)\.projectId,!1\)\}\);return eK\(\{archiveEnabled:',r'\1.projectId,!1)});return eK({cscId:\1.projectId,archiveEnabled:',2)
         body = replace(body,r'function eK\(\{archiveEnabled:', 'function eK({cscId,archiveEnabled:')
         body = replace(body,r'("edit-project",icon:\w+\.edit,message:\w+\.edit,onSelect:\w+\},)',
                        r'\1csc.menuItem("project",cscId),')
     elif role == 'linkedmenu':
-        body = replace(body, r'w=\(0,r\.c\)\(59\),\{align:', 'cscId=e.cscProjectId,w=(0,r.c)(60),{align:')
-        body = replace(body,r'w\[16\]!==t\)\{let e,a;if\(n=\[\{id:H,message:V',
-                       'w[16]!==t||w[59]!==cscId){let e,a;w[59]=cscId;if(n=[...cscId?[csc.menuItem("project",cscId)]:[],{id:H,message:V')
+        memo_header = r'([\w$]+)=\(0,r\.c\)\((\d+)\),\{align:'
+        memo, slots = re.search(memo_header, body).groups()
+        body = replace(body, memo_header, f'cscId=e.cscProjectId,{memo}=(0,r.c)({int(slots)+1}),{{align:')
+        body = replace(body, re.escape(memo)+r'\[16\]!==t\)\{(let [\w,]+;)if\(n=\[\{id:(\w+),message:V',
+                       lambda m: f'{memo}[16]!==t||{memo}[{slots}]!==cscId){{{m[1]}{memo}[{slots}]=cscId;'
+                       f'if(n=[...cscId?[csc.menuItem("project",cscId)]:[],{{id:{m[2]},message:V')
     elif role == 'chatmenu':
         body = replace(body,r'(selectedThreadKeys:(\w+),threadKey:(\w+)\}\)\{if\(\2.length<2\)return )t;',
                        r'\1[csc.menuItem("chat",\3),...t];')
@@ -133,8 +142,8 @@ def adapt(role, source, files, pet_assets):
         cloud = cloud.replace('g(Y,',f'(0,u.i1)({scope},').replace('get(Nr,',f'get({graph},')
         cloud = cloud.replace('EP.useMemo','f.useMemo').replace('=Z(chatDetailsCloudTimeSelector','=u._U(chatDetailsCloudTimeSelector').replace('$.','a.')
         extra = cloud
-        body = replace(body,r'i\[4\]!==N\|\|i\[5\]!==([\w$]+)\?\(n=e=>\(0,a.jsx\)\((\w+),\{item:\1,index:N,children:e\}\),i\[4\]=N',
-                       lambda m:f'i[{slot}]!==C||i[4]!==N||i[5]!=={m[1]}?(n=e=>(0,a.jsx)({m[2]},{{item:{m[1]},index:N,children:withCloudChatTime(e,{m[1]},C)}}),i[{slot}]=C,i[4]=N')
+        body = replace(body,r'i\[4\]!==(\w+)\|\|i\[5\]!==([\w$]+)\?\(n=e=>\(0,a.jsx\)\((\w+),\{item:\2,index:\1,children:e\}\),i\[4\]=\1',
+                       lambda m:f'i[{slot}]!==C||i[4]!=={m[1]}||i[5]!=={m[2]}?(n=e=>(0,a.jsx)({m[3]},{{item:{m[2]},index:{m[1]},children:withCloudChatTime(e,{m[2]},C)}}),i[{slot}]=C,i[4]={m[1]}')
     else:
         raise ValueError(f'Unknown renderer adapter {role}')
     if role in ('row','project','projectmenu','chatmenu','cloudmenu','linkedmenu'):
@@ -145,6 +154,23 @@ def adapt(role, source, files, pet_assets):
 def section_colour_action(section):
     return ('{id:"section-colour",message:{id:"local.sidebarColours.section",defaultMessage:"Section colour…"},'
             'onSelect:()=>window.dispatchEvent(new CustomEvent("csc-open-section-colour",{detail:'+section+'.id}))},')
+
+
+def add_pet_controls(data):
+    """Keep the floating pet's own menu, item format and close-before-select behaviour."""
+    settings = re.search(
+        rb'\{id:(?P<q>["`])pet-settings(?P=q),icon:(?P<icon>[\w.$]+),'
+        rb'message:(?P<message>\(0,[\w.$]+\)|[\w$]+)\(\{id:(?P=q)petOverlay\.settings(?P=q),'
+        rb'[^{}]*\}\),selectAfterClose:!0,onSelect:[\w$]+\},(?=\{id:(?P=q)close-avatar(?P=q))',
+        data,
+    )
+    if settings is None:
+        return data
+    item = (b'{id:"mod-controls",icon:' + settings['icon'] +
+            b',message:' + settings['message'] +
+            b'({id:"local.pet.modControls",defaultMessage:"Mod Controls"}),'
+            b'selectAfterClose:!0,onSelect:()=>window.localChatDetails.openModControls()},')
+    return data[:settings.end()] + item + data[settings.end():]
 
 
 
@@ -194,8 +220,9 @@ def renderer_patches(directory, read, source, pet_assets):
             menu = rb'(\{id:"edit-section",message:\w+\.edit,icon:[\w.]+,onSelect:\(\)=>[^{}]{1,90}\{section:(\w+)\}\)\},)(?=\{id:"section-chat-actions-separator")'
             original, hits = re.subn(menu,lambda m:m[1]+section_colour_action(m[2].decode()).encode(),original)
             section_count += hits
-        if edits or section_menu:
-            yield entry,original
+        patched = add_pet_controls(original) if b'{id:"pet-settings"' in original else original
+        if edits or section_menu or patched is not original:
+            yield entry,patched
     if section_count != 1:
         raise ValueError('Unrecognised desktop section menu')
     if host_count != 1:

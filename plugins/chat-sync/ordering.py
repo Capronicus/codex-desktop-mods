@@ -24,6 +24,17 @@ def valid(key, record):
     )
 
 
+def can_apply_queued_order(before, current, incoming):
+    """Allow membership changes while preserving an intervening local reorder."""
+    previous_ids = set(before)
+    current_ids = set(current)
+    if current_ids.difference(previous_ids, incoming):
+        return False
+    return [item for item in current if item in previous_ids] == [
+        item for item in before if item in current_ids
+    ]
+
+
 def reorder(existing, subset, encode=lambda i: i):
     """Replace only participating slots. Keep all unrelated items in their relative positions."""
     desired = list(dict.fromkeys(map(encode, subset)))

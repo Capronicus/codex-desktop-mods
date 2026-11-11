@@ -25,6 +25,42 @@ def ident():
 
 
 class DesktopSidebar(unittest.TestCase):
+    def test_queued_reorder_respects_intervening_edits(self):
+        with TemporaryDirectory() as temp:
+            home = Path(temp)
+            a, b, c, added = [ident() for _ in range(4)]
+            device = ident()
+            directory = home / "chat-sync"
+            state = directory / ("sidebar-" + device + ".json")
+            key = "order/projects"
+            sync.atomic(directory / "config.json", sync.encode({"sidebar": True, "device": device}))
+            for current, incoming, accepted in [
+                ([b, a, c], [c, b, a], False),
+                ([a, added, b, c], [c, added, b, a], True),
+                ([b, added, a, c], [c, added, b, a], False),
+                ([a, c], [c, a], True),
+            ]:
+                with self.subTest(current=current, incoming=incoming):
+                    sync.atomic(state, sync.encode({"seen": {key: [a, b, c]}}))
+                    def save_order(items):
+                        sync.atomic(home / ".codex-global-state.json", sync.encode({
+                            "project-order": items,
+                            "local-projects": {item: {"name": item} for item in items},
+                        }))
+
+                    save_order([a, b, c])
+                    changes = {key: [[a, b, c], incoming, None]}
+                    with patch.object(desktop_layout, "desktop_running", return_value=True), \
+                         patch.object(desktop_layout, "start_worker"):
+                        self.assertTrue(desktop_layout.queue(home, device, desktop_layout.Layout(home), changes))
+                    save_order(current)
+                    with patch.object(desktop_layout, "desktop_running", return_value=False):
+                        self.assertTrue(desktop_layout.apply_pending(home))
+                    self.assertEqual(desktop_layout.Layout(home).data["project-order"],
+                                     incoming if accepted else current)
+                    self.assertEqual(sync.read_json(state)["seen"][key],
+                                     incoming if accepted else [a, b, c])
+
     def test_helper_waits_for_desktop_exit(self):
         if desktop_layout.desktop_running():
             self.skipTest("This OS user already has a desktop running")

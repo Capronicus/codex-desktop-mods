@@ -1,5 +1,6 @@
 """Exercise the official Store package on a disposable Windows CI runner."""
 import json
+import mmap
 import os
 from pathlib import Path
 import subprocess
@@ -25,7 +26,10 @@ def main():
         raise RuntimeError('Expected a clean runner.')
     print(mods.apply(), flush=True)
     assert mods.status()['patch_state'] == 'ready'
-    exe = mods.runtime(*pkg, mods.data_dir()) / mods.EXE
+    runtime = mods.runtime(*pkg, mods.data_dir())
+    exe = runtime / mods.EXE
+    with (runtime / mods.ASAR).open('rb') as file, mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as archive:
+        assert archive.find(b'{id:"mod-controls",icon:') >= 0, 'Missing floating pet menu action'
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         profile = Path(tmp) / 'profile'
         # Package activation starts with the registered account's environment.
@@ -65,6 +69,10 @@ def main():
         (archive/('rollout-legacy-'+thread+'.jsonl')).write_text(''.join(json.dumps({
             'type':kind,'timestamp':'2026-11-09T08:00:00Z','payload':payload})+'\n' for kind,payload in rows))
         host_env = {**os.environ, 'CODEX_HOME':str(home), 'CODEX_ELECTRON_USER_DATA_PATH':str(profile)}
+        cli = pkg[0] / 'resources' / 'codex.exe'
+        repo = Path(__file__).resolve().parents[1]
+        for args in (['marketplace', 'add', str(repo)], ['add', 'chat-sync@capronicus-desktop-mods']):
+            subprocess.run([str(cli), 'plugin', *args], env=host_env, check=True)
         # The debug endpoint exists only in this CI test. Production launches have no debug flags.
         args = subprocess.list2cmdline(['--user-data-dir=' + str(profile),
                                         '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0'])
