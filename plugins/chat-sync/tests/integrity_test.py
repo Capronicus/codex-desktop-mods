@@ -1,9 +1,10 @@
 """Exercise shared-folder checks and repair with two disposable desktops."""
 
-from contextlib import ExitStack
+from contextlib import closing, ExitStack
 import gzip
 import json
 from pathlib import Path
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -35,6 +36,42 @@ class FolderIntegrity(unittest.TestCase):
         self.tid = self.a.chat()
         self.local = next((self.a.home / "archived_sessions").glob("*.jsonl"))
         self.writer = self.a.home / "thread-writer-locks" / (self.tid + ".lock")
+
+    def test_recovery_waits_only_for_the_locked_chat(self):
+        other = self.a.chat()
+        incoming = self.b.chat()
+        self.assertEqual(self.b.tool("sync_chats")["exported"], 1)
+        peer = next((self.vault / "heads").iterdir()).name
+        pending = self.a.home / "chat-sync" / "pending-projection"
+        pending.mkdir()
+        for tid in (self.tid, other):
+            (pending / tid).write_bytes(b"1")
+        tables = ("thread_items", "thread_turns", "thread_realtime_items", "thread_history_projection_state")
+        with closing(sqlite3.connect(self.a.home / "thread_history_1.sqlite")) as db:
+            with db:
+                db.execute("CREATE TABLE _sqlx_migrations (version INTEGER)")
+                for table in tables:
+                    db.execute("CREATE TABLE " + table + " (thread_id TEXT)")
+                    db.executemany("INSERT INTO " + table + " VALUES (?)", [(self.tid,), (other,), (incoming,)])
+            with sync.lock(self.writer):
+                stats = self.a.tool("sync_chats")
+                self.assertEqual((stats["busy"], stats["exported"], stats["imported"]), (1, 1, 1))
+                self.assertEqual(self.a.tool("mod_controls_status")["health"]["outcome"], "partial")
+                with self.assertRaisesRegex(ValueError, "Busy"):
+                    self.a.tool("adopt_chat_history", thread=self.tid, device=peer)
+                with self.assertRaisesRegex(ValueError, "Run a sync first"):
+                    self.a.tool("adopt_chat_history", thread=incoming, device=peer)
+                self.assertEqual(self.a.tool("chat_delivery_status", thread=self.tid)["status"], "busy")
+                self.assertFalse(any((self.vault / "heads").glob("*/" + self.tid + ".json")))
+                self.assertEqual({p.name for p in pending.iterdir()}, {self.tid})
+                for table in tables:
+                    self.assertEqual(set(db.execute("SELECT thread_id FROM " + table)), {(self.tid,), (incoming,)})
+            stats = self.a.tool("sync_chats")
+            self.assertEqual(stats["busy"], 0)
+            self.assertFalse(any(pending.iterdir()))
+            for table in tables:
+                self.assertEqual(list(db.execute("SELECT thread_id FROM " + table)), [(incoming,)])
+        self.assertEqual(self.b.tool("sync_chats")["imported"], 2)
 
     def test_busy_snapshot_and_repair(self):
         with sync.lock(self.writer):
