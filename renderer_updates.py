@@ -147,6 +147,23 @@ def section_colour_action(section):
             'onSelect:()=>window.dispatchEvent(new CustomEvent("csc-open-section-colour",{detail:'+section+'.id}))},')
 
 
+def add_pet_controls(data):
+    """Keep the floating pet's own menu, item format and close-before-select behaviour."""
+    settings = re.search(
+        rb'\{id:(?P<q>["`])pet-settings(?P=q),icon:(?P<icon>[\w.$]+),'
+        rb'message:(?P<message>\(0,[\w.$]+\)|[\w$]+)\(\{id:(?P=q)petOverlay\.settings(?P=q),'
+        rb'[^{}]*\}\),selectAfterClose:!0,onSelect:[\w$]+\},(?=\{id:(?P=q)close-avatar(?P=q))',
+        data,
+    )
+    if settings is None:
+        return data
+    item = (b'{id:"mod-controls",icon:' + settings['icon'] +
+            b',message:' + settings['message'] +
+            b'({id:"local.pet.modControls",defaultMessage:"Mod Controls"}),'
+            b'selectAfterClose:!0,onSelect:()=>window.localChatDetails.openModControls()},')
+    return data[:settings.end()] + item + data[settings.end():]
+
+
 
 def renderer_patches(directory, read, source, pet_assets):
     catalog = json.loads((source/'renderer-modules.json').read_text(encoding='utf-8'))
@@ -194,8 +211,9 @@ def renderer_patches(directory, read, source, pet_assets):
             menu = rb'(\{id:"edit-section",message:\w+\.edit,icon:[\w.]+,onSelect:\(\)=>[^{}]{1,90}\{section:(\w+)\}\)\},)(?=\{id:"section-chat-actions-separator")'
             original, hits = re.subn(menu,lambda m:m[1]+section_colour_action(m[2].decode()).encode(),original)
             section_count += hits
-        if edits or section_menu:
-            yield entry,original
+        patched = add_pet_controls(original) if b'{id:"pet-settings"' in original else original
+        if edits or section_menu or patched is not original:
+            yield entry,patched
     if section_count != 1:
         raise ValueError('Unrecognised desktop section menu')
     if host_count != 1:

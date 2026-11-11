@@ -123,7 +123,7 @@ class Layout:
                 applied[key] = value
                 continue
             if current.get(key) != before and not (
-                kind == "order" and set(current.get(key, [])) <= set(before or []) | set(value)
+                kind == "order" and ordering.can_apply_queued_order(before or [], current.get(key, []), value)
             ):
                 continue
             if kind == "project":

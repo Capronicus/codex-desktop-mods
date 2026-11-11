@@ -163,6 +163,13 @@ def patch_archive(destination, archive=None):
             ('preload.js', desktop, 'aa8be920fd14a9b98eca16c91d97a55105b196698fda36d5063e966620a0c54a', 'chat-details-preload.cjs'),
         ]
         def legacy_patches():
+            from renderer_updates import add_pet_controls
+            for name, entry in assets.items():
+                if name.startswith('avatar-overlay-') and name.endswith('.js'):
+                    original = read(entry)
+                    patched = add_pet_controls(original)
+                    if patched != original:
+                        yield entry, patched
             for name, directory, expected, extension in legacy:
                 entry = directory[name]
                 src.seek(data_start + int(entry['offset']))

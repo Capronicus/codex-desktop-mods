@@ -140,12 +140,22 @@ function CscChatLayout({react}) {
   return position && react.createElement(CscChatPet, {react, position, state});
 }
 
+async function cscPetContextMenu(event) {
+  const bridge = window.electronBridge;
+  if (!bridge?.showContextMenu || !window.localChatDetails?.openModControls) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const selection = await bridge.showContextMenu([{id: 'mod-controls', label: 'Mod Controls'}]);
+  if (selection?.id === 'mod-controls') await window.localChatDetails.openModControls();
+}
+
 function CscChatPet({react, position, state}) {
   const {overlayOpen, avatar, source, sprite, assets, summon} = cscUseNativePet();
   if (overlayOpen || !avatar) return null;
   const label = 'Open ' + (avatar.displayName || 'pet') + ' in the floating window';
   return react.createElement('button', {type:'button', className:'csc-chat-pet',
-    style:position, title:label, 'aria-label':label, onClick:summon},
+    style:position, title:label + ' · Right-click for Mod Controls', 'aria-label':label,
+    onClick:summon, onContextMenu:cscPetContextMenu},
   react.createElement(sprite, {source, assetMap:assets, state, loop:true}));
 }
 

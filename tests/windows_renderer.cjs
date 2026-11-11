@@ -61,6 +61,10 @@ async function probe(url) {
         assert.ok([...prefs].some(([k,v])=>k.startsWith('override-project/') && v==='on'));
         assert.ok([...prefs.keys()].some(k=>k.startsWith('swatch/')));
         console.log('Verified native Windows picker, group override and saved swatch.');
+        await evaluate('window.localChatDetails.openModControls()');
+        const panel = 'document.querySelector(\'webview[title="Mod Controls"]\')';
+        for (let i = 0; i < 80 && !await evaluate(`!!${panel}`); i++) await wait(250);
+        assert.ok(await evaluate(`!!${panel}`), 'the installed Mod Controls panel opened');
         return;
       }
       await wait(150);
