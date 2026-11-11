@@ -14,6 +14,8 @@ import activation
 import controls
 import integrity
 import outgoing
+import chat_actions
+import sharing_rules
 
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 STOP = threading.Event()
@@ -38,6 +40,8 @@ TOOLS = [
     {**tool("open_mod_controls", "Open Mod Controls to see sync health, pause transfers and change appearance.", readonly=True),
      "title": "Mod Controls", "_meta": {"ui": {"resourceUri": controls.URI},
                "openai/ui": {"entrypoints": [{"type": "global"}]}}},
+    tool("set_shared_exclusion","Stop or resume project or linked-folder transfers across updated desktops. Existing copies are retained.",
+         {"kind":{"type":"string","enum":["project","folder","rule"]},"ident":{"type":"string"},"enabled":{"type":"boolean"}}),
     tool("mod_controls_status", "Read local sync health, receipt counts and visual preferences.", readonly=True),
     tool("preview_chat_sharing", "Preview outgoing local chats and exclusions without transferring histories. Pages start at zero.",
          {"group": {"type": "string", "enum": ["all", *outgoing.GROUPS]},
@@ -80,7 +84,7 @@ TOOLS = [
         "set_local_only",
         "Exclude or include a local chat or project in future sync on this device. Reports previous sharing.",
         {
-            "kind": {"type": "string", "enum": ["chat", "project"]},
+            "kind": {"type": "string", "enum": ["chat", "project", "folder"]},
             "ident": {"type": "string"},
             "enabled": {"type": "boolean"},
         },
@@ -166,6 +170,7 @@ ACTIONS = {
     "name_sync_device": delivery.set_name,
     "set_sync_device_label": delivery.set_name,
     "set_local_only": projects.set_private,
+    "set_shared_exclusion": sharing_rules.set_rule,
     "preview_sidebar_sync": batches.review,
     "apply_sidebar_preview": lambda batch: batches.review("apply", batch),
     "undo_sidebar_sync": batches.undo,
@@ -183,6 +188,24 @@ ACTIONS = {
     "adopt_chat_history": lambda thread, device: sync.adopt_history(thread, device),
     "disable_chat_sync": sync.disable,
 }
+
+
+# Actions called by the interactive Mod Controls view.
+for name, fn, required, optional, readonly in (
+    ("chat_action_dashboard", chat_actions.dashboard, (), (), True),
+    ("open_linked_file", chat_actions.open_file, ("thread","reference"), (), True),
+    ("edit_linked_file", chat_actions.edit_file, ("thread","reference"), (), False),
+    ("reveal_linked_file", chat_actions.reveal_file, ("thread","reference"), (), False),
+    ("send_reply_handoff", chat_actions.handoff, ("thread","turn","device","request"), ("note","item"), False),
+    ("read_handoff_reply", chat_actions.reply, ("thread","turn"), ("item",), True),
+    ("dismiss_reply_handoff", chat_actions.dismiss, ("sender","request"), (), False),
+    ("list_chat_family", chat_actions.family, ("thread",), (), True),
+    ("compare_chat_histories", chat_actions.conflict, ("thread","left","right"), (), True),
+    ("desktop_chat_command", chat_actions.desktop_command, ("action",), ("thread","turn","item"), False),
+):
+    TOOLS.append({**tool(name, name.replace("_"," ").capitalize(), {k: {"type":"string"} for k in (*required,*optional)},
+                         readonly=readonly, optional=optional), "_meta":{"ui":{"visibility":["app"]}}})
+    ACTIONS[name] = fn
 
 
 def background():
@@ -207,7 +230,7 @@ def handle(req):
         version = params.get("protocolVersion")
         return {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[0],
-            "serverInfo": {"name": "chat-sync", "version": "0.11.0"},
+            "serverInfo": {"name": "chat-sync", "version": "0.12.0"},
             "capabilities": {"tools": {}, "resources": {}},
         }
     if method == "ping":

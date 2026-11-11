@@ -3,6 +3,7 @@
 function createSidebarColours({preferencesReady, getPreference, setPreference, preferenceKeys, watchPreferencePrefix, readProjectPage}) {
   if (window.localChatDetails?.visuals?.branchLines !== false) installForkLines();
   installDeliveryStatus();
+  installChatActions();
   const prefix = 'codex.sidebar-colours.v1/';
   const projectAttr = 'data-app-action-sidebar-project-id';
   const projectListAttr = 'data-app-action-sidebar-project-list-id';
@@ -514,7 +515,16 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     if (!read('chat',stable)) edits.push(['chat/' + stable,old]);
     await write(edits).catch(() => {});
   }
-  return {menuItem, migrate, activityDay};
+  function actionItems(kind,key) {
+    if (!window.localChatDetails?.openModControls || typeof key!=='string') return [];
+    const id=kind==='chat'?key.replace(/^(?:codex:thread:)?local:/,''):key;
+    if (!/^[0-9a-f-]{36}$/.test(id)) return [];
+    const project=kind==='project';
+    return [{id:'chat-sync-'+kind,message:{id:'local.chatActions.'+kind,
+      defaultMessage:project?'Project sharing…':'Chat branches…'},
+      onSelect:()=>window.localChatDetails.openModControls(project?{action:'project',project:id}:{action:'family',thread:id})}];
+  }
+  return {menuItem, actionItems, migrate, activityDay};
 }
 
 // Paint the relationship in the row gutter without changing native order or hit targets.
@@ -688,4 +698,117 @@ function installDeliveryStatus() {
   const refresh=()=>update().catch(()=>{});
   window.setInterval(refresh,5000);window.addEventListener('focus',refresh);
   window.addEventListener('csc-chat-origin-changed',()=>queueMicrotask(refresh));refresh();
+}
+
+function installChatActions() {
+  const api = window.localChatDetails;
+  if (!api?.listenActions || window.__cscChatActions) return;
+  window.__cscChatActions = true;
+  const markerSelector = '[data-csc-origin-thread][data-csc-reply-turn]';
+  function notice(text) {
+    let box=document.getElementById('csc-action-notice');
+    if (!box) {
+      box=document.createElement('div');box.id='csc-action-notice';box.setAttribute('role','status');
+      box.style.cssText='position:fixed;bottom:18px;left:50%;transform:translateX(-50%);max-width:85vw;padding:8px 16px;background:Canvas;color:CanvasText;border:1px solid GrayText;border-radius:9px;z-index:9999;pointer-events:none';
+      document.body.append(box);
+    }
+    box.textContent=text;
+    clearTimeout(box.cscTimer);box.cscTimer=setTimeout(()=>box.remove(),7500);
+  }
+  document.addEventListener('contextmenu', async event=>{
+    if(event.shiftKey || !window.electronBridge?.showContextMenu) return;
+    const target=event.target.closest?.('[data-turn-key]');
+    const marker=target?.querySelector(markerSelector);
+    if(!marker || marker.dataset.cscReplyRole==='user' || event.target.closest('input,textarea,[contenteditable=true],button'))return;
+    const selected=String(window.getSelection()||'').trim();
+    const anchor=event.target.closest('a,code');
+    let ref=selected || anchor?.getAttribute('href') || anchor?.textContent || '';
+    if(ref.startsWith('file:///')) {
+      try{ref=decodeURIComponent(new URL(ref).pathname).replace(/^\/(?=[a-z]:\/)/i,'');}catch{ref='';}
+    }
+    if(ref.length>4096 || /[\r\n]/.test(ref))ref='';
+    const nativeReply=event.target.closest('[data-response-annotation-target]');
+    if(marker.dataset.cscReplyRole==='turn' && !nativeReply && !event.target.closest('[data-local-conversation-final-assistant],[data-local-chat-detail="assistant"],[data-markdown-text-style="assistant-message"]'))return;
+    const args={thread:marker.dataset.cscOriginThread,turn:marker.dataset.cscReplyTurn,
+      item:nativeReply?.dataset.responseAnnotationTarget || marker.dataset.cscReplyItem || ''};
+    event.preventDefault();event.stopPropagation();
+    try {
+      const items=[{id:'handoff',label:'Hand off this reply…'},{id:'file',label:'Open local copy…'}];
+      if(selected)items.push({id:'copy',label:'Copy selection'});
+      items.push({id:'select',label:'Select all'});
+      const choice=await window.electronBridge.showContextMenu(items);
+      if(choice?.id==='copy')await navigator.clipboard.writeText(selected);
+      if(choice?.id==='select')document.execCommand('selectAll');
+      if(choice?.id==='file' || choice?.id==='handoff')await api.openModControls({...args,action:choice.id,reference:choice.id==='file'?ref:''});
+    } catch(error){notice(error.message);}
+  },true);
+
+  let currentJump, measuring=false;
+  async function navigate(command) {
+    currentJump=command.id;
+    const {thread,turn,item}=command;
+    await api.openChat(thread);
+    if(!turn)return;
+    const until=performance.now()+18000;
+    let previousTop=null,railTried=false;
+    while(currentJump===command.id && performance.now()<until) {
+      await new Promise(resolve=>setTimeout(resolve,110));
+      const pane=[...document.querySelectorAll('[data-thread-user-message-navigation-content]')].find(n=>
+        n.clientHeight && n.querySelector(markerSelector)?.dataset.cscOriginThread===thread);
+      if(!pane)continue;
+      const rows=[...pane.querySelectorAll(markerSelector)].filter(m=>m.dataset.cscReplyTurn===turn && m.dataset.cscReplyRole!=='user');
+      const nativeItem=item && rows.map(m=>m.closest('[data-turn-key]')?.querySelector(
+        '[data-response-annotation-target="'+CSS.escape(item)+'"]')).find(Boolean);
+      const match=item ? rows.find(m=>m.dataset.cscReplyItem===item) : rows.at(-1);
+      const row=nativeItem || match?.closest('[data-turn-key]');
+      if(row){row.scrollIntoView({block:'center',behavior:'instant'});
+        row.animate?.([{outline:'2px solid Highlight'},{outline:'2px solid transparent'}],{duration:1600});return;}
+      // The native rail can jump directly even if the turn has not mounted.
+      if(!railTried){
+        const button=[...pane.closest('main')?.querySelectorAll('[data-thread-user-message-navigation-item-id]')||[]]
+          .find(b=>b.dataset.threadUserMessageNavigationItemId.includes(turn));
+        if(button){button.click();railTried=true;continue;}
+      }
+      const scroller=pane.closest('[data-app-action-timeline-scroll]');
+      if(scroller && previousTop!==scroller.scrollTop){
+        previousTop=scroller.scrollTop;
+        scroller.scrollBy({top:-Math.max(180,scroller.clientHeight*.8),behavior:'instant'});
+      }
+    }
+    if(currentJump===command.id) notice('The reply is available under Reply handoffs in Mod Controls.');
+  }
+  function measure() {
+    if(measuring)return;
+    measuring=true;
+    const frames=[];let lastScroll=-Infinity,previous=0,start=0,thread=null,switchMs=null;
+    const onScroll=e=>{if(e.target.closest?.('[data-app-action-timeline-scroll],[data-app-shell-focus-area="sidebar"],nav,aside') ||
+        e.target.querySelector?.('[data-csc-chat-key]'))lastScroll=performance.now();};
+    const onClick=e=>{const key=e.target.closest?.('[data-csc-chat-key]')?.dataset.cscChatKey;
+      const id=key?.match(/(?:^|:)local:([0-9a-f-]{36})$/)?.[1];
+      if(id && ![...document.querySelectorAll('[data-csc-active-thread]')].some(n=>n.clientHeight && n.dataset.cscActiveThread===id)){
+        thread=id;start=performance.now();
+      }};
+    document.addEventListener('scroll',onScroll,true);document.addEventListener('pointerdown',onClick,true);
+    notice('For 12 seconds, scroll the sidebar or chat and switch to another local chat.');
+    const deadline=performance.now()+12000;let frame;
+    function tick(now){
+      if(previous && now-lastScroll<220 && !document.hidden)frames.push(now-previous);
+      previous=now;
+      if(thread && [...document.querySelectorAll('[data-csc-active-thread]')].some(n=>n.clientHeight && n.dataset.cscActiveThread===thread)){
+        switchMs=now-start;thread=null;
+      }
+      if(now<deadline)frame=requestAnimationFrame(tick);
+    }
+    frame=requestAnimationFrame(tick);
+    setTimeout(async()=>{
+      measuring=false;cancelAnimationFrame(frame);document.removeEventListener('scroll',onScroll,true);document.removeEventListener('pointerdown',onClick,true);
+      frames.sort((a,b)=>a-b);
+      const report={frames:frames.length,slow:frames.filter(x=>x>30).length,p95:frames.length?frames[Math.ceil(.95*frames.length)-1]:null,switchMs};
+      try{await api.savePerformance(report);notice('Responsiveness check saved in Mod Controls.');}catch(e){notice(e.message);}
+    },12030);
+  }
+  api.listenActions(command=>{
+    if(command.action==='measure')measure();
+    else if(command.action==='navigate')navigate(command).catch(e=>notice(e.message));
+  });
 }

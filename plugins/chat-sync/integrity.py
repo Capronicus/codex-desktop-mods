@@ -56,7 +56,9 @@ def inspect_folder(repair=False):
             sync.require_active(cfg)
         if not vault.is_dir() or vault.resolve() != vault:
             raise ValueError("Sync folder unavailable. Check the mount or desktop sync client.")
-        needs_membership = cfg.get("private_projects") or cfg.get("project_links")
+        import sharing_rules
+        needs_membership = (cfg.get("private_projects") or cfg.get("project_links") or
+                            cfg.get("private_folders") or sharing_rules.records(cfg, vault))
         index = sync.catalog() if needs_membership else {}
         private = projects.Sharing(cfg, vault, index, sync.HOME).private_chats
         incomplete = {}

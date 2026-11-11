@@ -343,6 +343,70 @@
     return {version,account,entries:rows,inherited:[...hints.values()]};
   });
 
+  const actionDir = path.join(home, 'chat-sync');
+  const primaryFrame = event => event.senderFrame && event.senderFrame === event.sender.mainFrame &&
+    /^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(event.senderFrame.url);
+  async function saveAction(name, value) {
+    await fs.mkdir(actionDir, {recursive:true, mode:0o700});
+    const tmp = path.join(actionDir, '.action-' + require('node:crypto').randomUUID());
+    try {
+      await fs.writeFile(tmp, JSON.stringify(value), {mode:0o600, flag:'wx'});
+      await fs.rename(tmp, path.join(actionDir, name));
+    } finally { await fs.unlink(tmp).catch(()=>{}); }
+  }
+  ipcMain.handle('local-chat-actions:context', async (event, input) => {
+    if (!primaryFrame(event) || !input || !['handoff','inbox','file','family','project','conflicts','performance'].includes(input.action))
+      throw new Error('Unavailable desktop action.');
+    const ctx = {action:input.action,id:require('node:crypto').randomUUID(),at:Date.now()};
+    for (const key of ['thread','turn','project']) if (typeof input[key]==='string' && idPattern.test(input[key])) ctx[key]=input[key];
+    for (const [key,limit] of [['reference',4096],['item',160]]) if (typeof input[key]==='string') ctx[key]=input[key].slice(0,limit);
+    await saveAction('desktop-request.json',ctx);
+  });
+  ipcMain.handle('local-chat-actions:performance', async (event, report) => {
+    if (!primaryFrame(event)) return;
+    const value={at:Date.now()};
+    for (const key of ['frames','slow','p95','switchMs']) {
+      const n=report?.[key];
+      value[key]=Number.isFinite(n) && n>=0 && n<=120000 ? Math.round(n) : null;
+    }
+    await saveAction('desktop-performance.json',value);
+  });
+  const clients=new Set();
+  let watcher;
+  async function dispatchCommand(){
+    const targets=[...clients].filter(w=>!w.isDestroyed());
+    const contents=targets.find(w=>w.isFocused()) || targets[targets.length-1];
+    if (!contents || !/^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(contents.mainFrame.url)) return;
+    const command=path.join(actionDir,'desktop-command.json');
+    const claimed=path.join(actionDir,'.command-'+require('node:crypto').randomUUID());
+    try {
+      await fs.rename(command,claimed);
+      const doc=JSON.parse(await fs.readFile(claimed,'utf8'));
+      if(Date.now()-doc.at>=0 && Date.now()-doc.at<60000 && (doc.action==='measure' ||
+          (doc.action==='navigate' && idPattern.test(doc.thread) && (!doc.turn || idPattern.test(doc.turn)))))
+        contents.send('local-chat-actions:command',doc);
+    } catch { /* Another window may already have claimed the request. */ }
+    finally {await fs.unlink(claimed).catch(()=>{});}
+  }
+  ipcMain.on?.('local-chat-actions:listen',async event=>{
+    if(!primaryFrame(event))return;
+    const contents=event.sender;
+    if(!clients.has(contents)){
+      clients.add(contents);
+      contents.once('destroyed',()=>{clients.delete(contents);if(!clients.size){watcher?.close();watcher=null;}});
+    }
+    try {
+      await fs.mkdir(actionDir,{recursive:true,mode:0o700});
+      if(!watcher){
+        watcher=require('node:fs').watch(actionDir, (_event,file)=>{
+          if(!file || file==='desktop-command.json') void dispatchCommand();
+        });
+        watcher.on('error',()=>{watcher?.close();watcher=null;});
+      }
+      await dispatchCommand();
+    } catch { /* Other desktop features work without the local panel. */ }
+  });
+
   let receiptCache;
   ipcMain.handle('local-chat-sync:delivery', async (event,ids) => {
     const frame=event.senderFrame;

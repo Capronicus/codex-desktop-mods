@@ -73,6 +73,7 @@ def status():
 
 def resource():
     html = Path(__file__).with_name("mod-controls.html").read_text(encoding="utf-8")
+    html = html.replace("/* CHAT_ACTIONS_VIEW */", Path(__file__).with_name("chat-actions-view.js").read_text(encoding="utf-8"))
     return {"uri": URI, "mimeType": MIME, "text": html,
             "_meta": {"openai/ui": {"availableDisplayModes": ["inline", "fullscreen"],
                                     "preferredDisplayMode": "fullscreen"}}}

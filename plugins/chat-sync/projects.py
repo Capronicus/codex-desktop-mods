@@ -28,7 +28,12 @@ def local_projects(home):
             for k, v in layout.projects.items()
             if valid_id(k)
         }
-    with closing(sqlite3.connect((home / "state_5.sqlite").as_uri() + "?mode=ro", uri=True)) as db:
+    catalogue = home / "state_5.sqlite"
+    if not catalogue.is_file():
+        return {}
+    with closing(sqlite3.connect(catalogue.as_uri() + "?mode=ro", uri=True)) as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='projects'").fetchone():
+            return {}
         import json
 
         return {
@@ -182,13 +187,34 @@ class Sharing:
         self.private_projects = set(cfg.get("private_projects", []))
         self.members = {}
         self.links = None
+        self.roots = {}
+        self.source_roots = {}
+        import sharing_rules
+        rules = sharing_rules.records(cfg,vault) if cfg.get("device") else {}
+        self.shared_rules = {}
+        self.excluded_folders = list(cfg.get("private_folders", []))
         # Ordinary transcript-only profiles need no desktop or sidebar schema.
-        if self.private_projects or cfg.get("project_links"):
+        if self.private_projects or cfg.get("project_links") or rules:
             import desktop_layout
 
             layout = desktop_layout.Layout(home)
             projects = local_projects(home)
             links = self.links = Links(cfg, vault, projects)
+            self.shared_rules = sharing_rules.canonical(rules,links)
+            roots = self.roots = sharing_rules.project_roots(cfg,projects,links)
+            for file in (vault / "file-roots-v1").glob("*.json"):
+                if not valid_id(file.stem):continue
+                for pid, hashes in peer_file(file).items():
+                    if valid_id(pid) and isinstance(hashes, list):
+                        for key in hashes:
+                            if isinstance(key,str) and sync.HEX.fullmatch(key):
+                                self.source_roots.setdefault(key,set()).add(links.wire(pid))
+            for key, (_,enabled,_,threads) in self.shared_rules.items():
+                if not enabled:continue
+                pid,relative = sharing_rules.parse(key)
+                self.private_chats.update(threads)
+                if not relative:self.private_projects.add(pid)
+                if pid in roots:self.excluded_folders.append(str(roots[pid]/relative))
             aliases = {v: k for k, v in layout.project_ids.items()}
             self.private_projects = {links.wire(i) for i in self.private_projects}
             shared = {
@@ -212,10 +238,59 @@ class Sharing:
                 if links.wire(aliases.get(k, k)) in self.private_projects
             )
 
+        self.folder_chats = set()
+        if self.excluded_folders:
+            cfg = {**cfg, "private_folders":self.excluded_folders}
+            self.folder_chats.update(t for t, row in index.items() if folder_excluded(row.get("cwd"), cfg))
+            self.folder_chats.update(t for t in self.members if folder_excluded(self.checkout(t), cfg))
+            for tid, entry in sync.streams().items():
+                if tid in self.folder_chats or (tid in index and index[tid].get("cwd")):
+                    continue
+                # A just-created chat can reach disk before its catalogue row.
+                try:
+                    import json
+                    with sync.open_rollout(entry[0]) as stream:
+                        cwd = json.loads(stream.readline(2 * 1024 * 1024))["payload"]["cwd"]
+                    if not cwd or folder_excluded(cwd, cfg):
+                        self.folder_chats.add(tid)
+                except (OSError, ValueError, TypeError, KeyError, EOFError):
+                    self.folder_chats.add(tid)
+            self.private_chats.update(self.folder_chats)
+
     def checkout(self, tid):
         return (
             self.links.checkouts.get(self.links.wire(self.members.get(tid))) if self.links else None
         )
+
+    def blocks_incoming(self, vault, tid, manifests):
+        if tid in self.private_chats:
+            return True
+        if not self.excluded_folders and not self.private_projects:
+            return False
+        from chat_actions import source_path, root_key
+        import json
+        folders = {"private_folders": self.excluded_folders}
+        for man in manifests:
+            header = bytearray()
+            for key in man["chunks"]:
+                head, sep, _ = sync.block_data(vault,key).partition(b"\n")
+                header.extend(head)
+                if len(header)>8*sync.BLOCK:
+                    raise ValueError("Cannot check the workspace of this chat yet.")
+                if sep:break
+            p=json.loads(header).get("payload", {})
+            cwd=p.get("cwd")
+            if not isinstance(cwd,str) or not cwd or cwd.startswith(("//","\\")):continue
+            if folder_excluded(cwd,folders):return True
+            source=source_path(cwd)
+            for base in (source,*source.parents):
+                for pid in self.source_roots.get(root_key(base),()):
+                    if pid in self.private_projects:return True
+                    if pid in self.roots:
+                        relative=source.relative_to(base)
+                        if ".." not in relative.parts and folder_excluded(str(self.roots[pid].joinpath(*relative.parts)),folders):
+                            return True
+        return False
 
     def allows_row(self, key, rec):
         kind, ident = key.split("/")
@@ -233,16 +308,32 @@ class Sharing:
         )
 
 
+def folder_excluded(value, cfg):
+    folders = cfg.get("private_folders", [])
+    if not folders or not isinstance(value, str) or not value or not Path(value).is_absolute():
+        return False
+    path = Path(value).resolve()
+    return any(path == Path(root) or Path(root) in path.parents for root in folders)
+
+
 def set_private(kind, ident, enabled):
-    if kind not in ("chat", "project") or not valid_id(ident):
+    if kind == "folder":
+        folder = Path(ident).expanduser()
+        if not folder.is_absolute() or (enabled and not folder.is_dir()):
+            raise ValueError("Choose an existing absolute local folder.")
+        ident = str(folder.resolve())
+    elif kind not in ("chat", "project") or not valid_id(ident):
         raise ValueError("Choose a chat or project UUID.")
     with sync.lock(sync.STATE / "sync.lock"):
         cfg, vault = config()
-        key = "private_chats" if kind == "chat" else "private_projects"
+        key = {"chat": "private_chats", "project": "private_projects", "folder": "private_folders"}[kind]
         entries = set(cfg.get(key, []))
         prior = sync.read_json(sync.STATE / ("state-" + cfg["device"] + ".json"), {})
         if kind == "chat":
             previously = ident in prior or (vault / "versions" / ident).is_dir()
+        elif kind == "folder":
+            membership = Sharing({**cfg, "private_folders": [ident]}, vault, sync.catalog(), sync.HOME)
+            previously = any(t in prior or (vault / "versions" / t).is_dir() for t in membership.folder_chats)
         else:
             rows = sidebar_rows(vault)
             membership = Sharing(

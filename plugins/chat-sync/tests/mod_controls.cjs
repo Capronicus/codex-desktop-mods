@@ -178,6 +178,34 @@ async function run() {
     await page.setViewportSize({width:360,height:740});
     const frame = page.frames().find(frame => frame.parentFrame());
     assert.ok(await frame.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await panel.getByText('Chat actions and sharing',{exact:true}).click();
+    await panel.getByText('Project and folder exclusions',{exact:true}).click();
+    await panel.locator('#sharing-project').selectOption(project,{timeout:8000});
+    await panel.locator('#sharing-scope').selectOption('shared');
+    await panel.getByRole('button',{name:'Stop syncing project',exact:true}).click();
+    await panel.getByRole('button',{name:'Resume on all PCs',exact:true}).waitFor();
+    await panel.getByRole('button',{name:'Resume on all PCs',exact:true}).click();
+    await panel.getByRole('button',{name:'Stop syncing project',exact:true}).waitFor();
+    const turn=crypto.randomUUID(),stateDir=path.join(home,'chat-sync');
+    const cfg=JSON.parse(await fs.readFile(path.join(stateDir,'config.json')));
+    const receipts=path.join(folder,'codex-chat-sync-v1','receipts-v1');
+    await fs.mkdir(receipts,{recursive:true});
+    await fs.writeFile(path.join(receipts,peer+'.json'),JSON.stringify({v:1,name:'Home'}));
+    const history=path.join(home,'archived_sessions','rollout-2026-11-08T12-00-00-'+tid+'.jsonl');
+    await fs.appendFile(history,JSON.stringify({type:'turn_context',payload:{turn_id:turn}})+'\n'+
+      JSON.stringify({type:'response_item',payload:{type:'message',role:'assistant',id:'item-a',content:[{type:'output_text',text:'Read me at Home'}]}})+'\n');
+    await fs.writeFile(path.join(stateDir,'desktop-request.json'),JSON.stringify({action:'handoff',id:crypto.randomUUID(),thread:tid,turn,item:'item-a',at:Date.now()}));
+    if(cfg.paused) await request('tools/call',{name:'set_sync_paused',arguments:{paused:false}});
+    await panel.getByRole('button',{name:'Refresh',exact:true}).click();
+    await panel.locator('#handoff-device').selectOption(peer,{timeout:8000});
+    await panel.getByLabel('Optional note').fill('Test at Home');
+    await panel.getByRole('button',{name:'Send handoff',exact:true}).click();
+    await panel.getByText('This chat is local only.',{exact:true}).waitFor();
+    await request('tools/call',{name:'set_local_only',arguments:{kind:'chat',ident:tid,enabled:false}});
+    await panel.getByRole('button',{name:'Send handoff',exact:true}).click();
+    await panel.getByText('Handoff saved for Home.').waitFor({timeout:5000}).catch(async error=>{throw new Error((await panel.locator('#action-status').innerText())+' · '+error.message)});
+    const handoffs=path.join(folder,'codex-chat-sync-v1','handoffs-v1',peer,cfg.device);
+    assert.equal((await fs.readdir(handoffs)).length,1);
     console.log('Passed outgoing search and exclusions while paused, sidebar review and undo, sync controls and narrow layout in Chromium.');
   } finally {
     child.stdin.end();

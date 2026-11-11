@@ -2,7 +2,7 @@ name: Chat sync across Linux and Windows
 on:
   workflow_dispatch:
   push:
-    branches: [main, codex/chat-sync, codex/sidebar-palette, codex/sidebar-sync, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/sync-repair, codex/pet-controls, codex/defer-busy-recovery, codex/sidebar-review-panel, codex/outgoing-chat-preview]
+    branches: [main, codex/device-chat-actions, codex/chat-sync, codex/sidebar-palette, codex/sidebar-sync, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/sync-repair, codex/pet-controls, codex/defer-busy-recovery, codex/sidebar-review-panel, codex/outgoing-chat-preview]
     paths:
       - '.agents/plugins/marketplace.json'
       - '.github/workflows/chat-sync.yml'
@@ -20,6 +20,7 @@ jobs:
       - run: python3 plugins/chat-sync/tests/account_colours.py
       - run: python3 plugins/chat-sync/tests/mod_controls.py
       - run: python3 plugins/chat-sync/tests/integrity_test.py
+      - run: python3 plugins/chat-sync/tests/chat_actions.py
       - run: python3 plugins/chat-sync/tests/sidebar_layout_test.py
       - run: python3 plugins/chat-sync/tests/cross_platform.py seed "$RUNNER_TEMP/seed"
       - uses: actions/upload-artifact@v4
@@ -56,6 +57,7 @@ jobs:
       - run: python plugins/chat-sync/tests/account_colours.py
       - run: python plugins/chat-sync/tests/mod_controls.py
       - run: python plugins/chat-sync/tests/integrity_test.py
+      - run: python plugins/chat-sync/tests/chat_actions.py
       - run: python plugins/chat-sync/tests/sidebar_layout_test.py
       - run: python plugins/chat-sync/tests/cross_platform.py reply "$env:RUNNER_TEMP/transfer"
       - uses: actions/upload-artifact@v4

@@ -18,6 +18,7 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 #outgoing h3{font-size:16px;margin:0}#outgoing-filter{display:flex;align-items:end;gap:8px;flex-wrap:wrap}
 #outgoing-filter label{display:grid;gap:3px;min-width:0}#outgoing-filter input,#outgoing-filter select{font:inherit;max-width:100%;min-width:0;padding:5px;color:inherit;background:Canvas;border:1px solid GrayText;border-radius:6px}
 #outgoing-list{list-style:none;margin:0;padding:0}#outgoing-list li{border-top:1px solid color-mix(in srgb,currentColor 13%,transparent);display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0}#outgoing-list li div{min-width:0;overflow-wrap:anywhere}#outgoing-list small{display:block}#outgoing-list button{flex:none;font-size:13px;padding:4px 8px}
+#action-content pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:55vh;overflow:auto}#action-content img{max-width:100%;max-height:60vh}#chat-actions button{margin:4px}#chat-actions input,#chat-actions select{max-width:100%;font:inherit}
 </style></head><body><main>
 <div class="head"><h1>Mod Controls</h1><button id="refresh" disabled>Refresh</button></div>
 <p id="notice" role="status" aria-live="polite">Connecting to Chat Sync…</p>
@@ -39,6 +40,21 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 <p id="outgoing-count" role="status"></p><ul id="outgoing-list"></ul>
 <div class="actions" id="outgoing-pages"><button id="outgoing-prev" type="button">Previous</button><button id="outgoing-next" type="button">Next</button></div>
 </div></section>
+<section><details id="chat-actions"><summary>Chat actions and sharing</summary>
+<p id="action-status" role="status" aria-live="polite"></p>
+<details id="file-copy"><summary>Open local copy</summary><p id="file-hint"></p><label>File in linked project <input id="file-reference" maxlength="4096"></label> <button id="file-open">Open local copy</button></details>
+<details id="send-handoff"><summary>Hand off a reply</summary><p id="send-hint"></p>
+<label>Send to <select id="handoff-device"></select></label> <label>Optional note <input id="handoff-note" maxlength="500"></label> <button id="handoff-send">Send handoff</button></details>
+<details id="handoff-inbox"><summary>Reply handoffs</summary><ul id="inbox-list"></ul></details>
+<details id="branches"><summary>Chat branches</summary><p id="family-hint"></p><button id="family-show">Show parent and branches</button></details>
+<details id="conflict-preview"><summary>Compare conflicting chats</summary><ul id="conflict-list"></ul></details>
+<details id="exclude-project"><summary>Project and folder exclusions</summary>
+<p>Earlier shared copies are retained. A shared rule takes effect when each updated PC receives it. Shared folders are relative to their project checkout.</p>
+<label>Apply to <select id="sharing-scope"><option value="local">This PC</option><option value="shared">All connected PCs</option></select></label> <label>Project <select id="sharing-project"></select></label> <button id="project-rule">Stop syncing project</button>
+<p><label>Local folder <input id="sharing-folder" placeholder="Absolute folder path"></label> <button id="folder-rule">Stop syncing folder</button></p><ul id="excluded-folders"></ul><ul id="shared-exclusions"></ul></details>
+<details id="performance"><summary>Desktop responsiveness</summary><button id="perf-start">Check responsiveness</button><p id="perf-result"></p></details>
+<div id="action-content" aria-live="polite"></div><button id="actions-refresh">Refresh chat actions</button>
+</details></section>
 <section id="sidebar-review" hidden><h2>Sidebar changes</h2>
 <p id="sidebar-status"></p>
 <div class="actions"><button id="preview-sidebar" disabled>Preview changes</button>
@@ -62,7 +78,7 @@ let seq = 0, state, working = true;
 let preview=null, visibleChanges=25;
 let outgoing=null;
 const sharingGroups={all:'All local chats',pending:'New or changed',check:'Needs checking',unchanged:'No local changes',excluded:'Local-only',unavailable:'Unavailable'};
-const sharingReasons={new:'New on this desktop',changed:'Changed since last local snapshot',unchanged:'No local changes',unindexed:'Sync will check the source of this unindexed history',no_fingerprint:'Awaiting local snapshot check',recovery:'Awaiting recovery check',chat_rule:'Excluded by chat rule',project_rule:'Excluded by project rule',multiple_files:'Multiple local history files',missing_file:'History file missing',unreadable:'History file unavailable'};
+const sharingReasons={new:'New on this desktop',changed:'Changed since last local snapshot',unchanged:'No local changes',unindexed:'Sync will check the source of this unindexed history',no_fingerprint:'Awaiting local snapshot check',recovery:'Awaiting recovery check',chat_rule:'Excluded by chat rule',project_rule:'Excluded by project rule',folder_rule:'Excluded by folder rule',multiple_files:'Multiple local history files',missing_file:'History file missing',unreadable:'History file unavailable'};
 for(const [value,label] of Object.entries(sharingGroups))el('outgoing-group').add(new Option(label,value));
 function send(message){parent.postMessage({jsonrpc:'2.0',...message},'*')}
 function rpc(method,params){
@@ -274,7 +290,7 @@ async function act(tool,args={},message=''){
     if(tool) try{state=await call('mod_controls_status')}catch{}
   } finally{working=false;render()}
 }
-el('refresh').onclick=()=>act();
+el('refresh').onclick=async()=>{await act();if(typeof loadActions==='function')await loadActions();};
 el('run').onclick=()=>act('mod_controls_sync');
 el('pause').onclick=()=>act('set_sync_paused',{paused:!state.paused});
 el('preview-sharing').onclick=()=>{
@@ -314,11 +330,12 @@ el('undo-sidebar').onclick=()=>act('undo_sidebar_batch',{batch:state.sidebarRevi
   result.undo_on_quit?'Fully quit the app to finish undoing the last sidebar batch.':'Sidebar restored. Project, section and order sync are off on this desktop.');
 async function connect(){
   try{
-    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.11.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
+    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.12.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
     theme(host.hostContext);send({method:'ui/notifications/initialized',params:{}});
     new ResizeObserver(()=>send({method:'ui/notifications/size-changed',params:{height:document.querySelector('main').offsetHeight}})).observe(document.querySelector('main'));
-    working=false;await act();
+    working=false;await act();if(typeof loadActions==='function')await loadActions();
   }catch(e){el('notice').textContent=e.message;working=false;el('refresh').disabled=false;el('refresh').onclick=()=>{el('refresh').disabled=true;connect().then(()=>{if(state)el('refresh').onclick=()=>act()})}}
 }
+/* CHAT_ACTIONS_VIEW */
 connect();
 </script></body></html>

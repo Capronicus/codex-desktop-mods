@@ -2,7 +2,7 @@ name: Windows desktop mods
 on:
   workflow_dispatch:
   push:
-    branches: [main, windows-port, codex/sidebar-palette, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/pet-controls, codex/recover-desktop-metadata]
+    branches: [main, codex/device-chat-actions, windows-port, codex/sidebar-palette, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/pet-controls, codex/recover-desktop-metadata]
 permissions:
   contents: read
 jobs:

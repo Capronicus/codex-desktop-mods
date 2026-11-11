@@ -130,7 +130,9 @@ function withChatDetails(entry, row, React, jsx) {
   if(type && type!=='user-message' && type!=='assistant-message')return row;
   const line=role=>role==='user' && visuals?.timestamps===false ? null : jsx.jsx(ChatDetailLine,{entry,role,React,jsx},role);
   const marker=(!entry.hostId || entry.hostId==='local') && jsx.jsx('span',{
-    hidden:true,'data-csc-origin-thread':entry.conversationId,ref:markOriginThread
+    hidden:true,'data-csc-origin-thread':entry.conversationId,'data-csc-reply-turn':entry.turnId,
+    'data-csc-reply-item':entry.transcriptBlock?.item?.id,
+    'data-csc-reply-role':type==='user-message'?'user':type==='assistant-message'?'assistant':'turn',ref:markOriginThread
   },'origin');
   const details=visuals?.timestamps!==false || visuals?.tokens!==false;
   return jsx.jsxs(jsx.Fragment,{children:[marker,details&&(!type || type==='user-message')&&line('user'),row,details&&(!type || type==='assistant-message')&&line('assistant')]});
