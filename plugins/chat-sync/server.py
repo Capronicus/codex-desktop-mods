@@ -1,6 +1,7 @@
 """Local, newline-delimited MCP server for Codex Chat Sync."""
 
 import json
+from http.client import HTTPException
 import sys
 import sqlite3
 import subprocess
@@ -9,6 +10,7 @@ import sync
 import projects
 import delivery
 import batches
+import activation
 
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 STOP = threading.Event()
@@ -123,8 +125,10 @@ TOOLS = [
         "disable_chat_sync",
         "Stop participating in the configured folder; existing copies stay in place.",
     ),
-]
+] + activation.TOOLS
 ACTIONS = {
+    "activation_status": activation.status,
+    "report_activation": activation.report,
     "list_sync_projects": projects.inventory,
     "link_sync_project": projects.link,
     "chat_delivery_status": delivery.status,
@@ -170,7 +174,7 @@ def handle(req):
         version = params.get("protocolVersion")
         return {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[0],
-            "serverInfo": {"name": "chat-sync", "version": "0.5.0"},
+            "serverInfo": {"name": "chat-sync", "version": "0.6.0"},
             "capabilities": {"tools": {}},
         }
     if method == "ping":
@@ -193,7 +197,12 @@ def handle(req):
         raise ValueError("Invalid tool arguments")
     try:
         result = ACTIONS[name](**args)
-        return {"content": [{"type": "text", "text": json.dumps(result)}]}
+        content = [{"type": "text", "text": json.dumps(result)}]
+        if name == "sync_chats":
+            invitation = activation.offer()
+            if invitation:
+                content.append({"type": "text", "text": json.dumps({"activation_offer": invitation})})
+        return {"content": content}
     except (
         OSError,
         ValueError,
@@ -201,6 +210,7 @@ def handle(req):
         sqlite3.Error,
         EOFError,
         subprocess.SubprocessError,
+        HTTPException,
     ) as exc:
         return {
             "isError": True,

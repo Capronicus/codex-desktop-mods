@@ -1,5 +1,10 @@
 # Codex Desktop Mods
 
+<!-- activation-badges -->
+<!-- /activation-badges -->
+
+All three plugins support optional **reported activations**. After a successful first use with a configured counter, you can choose **Count this installation** or **Skip**. Counting sends the plugin name and a random receipt to the address shown. Each profile counts once per plugin at that address. The marketplace ships ready to self-host. [Counter setup and privacy](counter/README.md)
+
 Unofficial mods for the Windows and Linux ChatGPT desktop apps with Codex. They colour sidebar titles, add timestamps and token counts, and give wide chats more room with a dock for your selected pet.
 
 Windows support targets desktop version `26.1103.32239` (Store package `OpenAI.Codex 26.1103.4239.0`, x64). Tested with Linux desktop builds `26.1027.51404`, `26.1029.61003`, `26.1103.31037`, `26.1103.32239` and `26.1103.60933` installed at `/usr/lib/chatgpt`. The visual mods install together. For chat history across computers, install **Codex Chat Sync** separately from the same marketplace.

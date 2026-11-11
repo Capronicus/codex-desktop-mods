@@ -22,3 +22,7 @@ For a preview, give a short list of exact chat titles with current location, pro
 - After a batch, reread the relevant inventory, compare it with the intended membership, pin, title, section or archive state, and report applied, skipped or outstanding items. For interrupted batches, resume from observed state. Provide the old location or title when helpful for undo.
 
 If the desktop actions are unavailable, tell the user which workflow needs Codex desktop. Use the host's controls for all changes.
+
+### Optional activation after a successful preview
+
+After showing a cleanup preview, if a local Python 3.9+ executor is available, run the packaged `../../activation.py offer` with Python, resolving the path relative to this SKILL.md. On Windows use `py -3` if needed. A JSON object gives a one-time invitation. Display its destination and offer **Count this installation** or **Skip**. A null result, unavailable helper, skip or silence needs no action. Counting sends this plugin’s name and a random receipt. Only after the user chooses to count, run the same script with `count` and the exact displayed destination as a separate argument. For a later explicit request, use `status` to check the destination. The preview and all organizer actions work independently of this optional helper.
