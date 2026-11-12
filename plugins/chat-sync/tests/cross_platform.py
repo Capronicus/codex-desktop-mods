@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import uuid
 
 from native_fixture import App, prepare, ROOT
 
@@ -17,6 +18,8 @@ NAME = "Cross-platform test café"
 FIRST = "Synthetic chat from Linux"
 SECOND = "Second metadata check from Windows"
 WINDOWS_CHAT = "Created separately on Windows"
+HANDOFF_NOTE = "Check this file on Home."
+FILENAME = "review notes.txt"
 
 
 def start(app):
@@ -118,7 +121,60 @@ def settings_fixture(app, call, stage, vault, home):
     return desktop
 
 
-def exercise(stage, vault, incoming, home):
+def link_checkout(call, project, checkout):
+    project_id = project["metadata"].get("codex.localProjectId", project["id"])
+    checkout.mkdir(parents=True, exist_ok=True)
+    call("link_sync_project", local_project=project_id, shared_project=project_id, folder=str(checkout))
+    return project_id
+
+
+def send_work_reply(app, call, tid, project, checkout):
+    link_checkout(call, project, checkout)
+    (checkout / FILENAME).write_text("Work copy", encoding="utf-8")
+    for name, tool in (("work-only", "set_local_only"), ("all-desktops", "set_shared_exclusion")):
+        folder = checkout / name
+        folder.mkdir()
+        call(tool, kind="folder", ident=str(folder), enabled=True)
+    app.turn(tid, SECOND)
+    assert sync(call)["exported"] >= 1
+    turns = app.call("thread/turns/list", {"threadId": tid, "itemsView": "full"})["data"]
+    turn, item = next((t, i) for t in turns for i in t["items"]
+                      if i.get("type") == "agentMessage" and "Birch metadata verified." in i.get("text", ""))
+    assert str(checkout / FILENAME) in item["text"], item
+    panel = call("chat_action_dashboard")
+    home_id, = [device for device, name in panel["devices"].items() if name == "Home"]
+    request = str(uuid.uuid4())
+    for _ in range(2):
+        assert call("send_reply_handoff", thread=tid, turn=turn["id"], item=item["id"],
+                    device=home_id, request=request, note=HANDOFF_NOTE)["sent"]
+    assert not call("chat_action_dashboard")["inbox"]
+
+
+def receive_work_reply(app, call, home):
+    start(app)
+    call("set_sidebar_sync", enabled=True)
+    sync(call)
+    project = group(app, "project/list", "Renamed project")
+    checkout = home.parent / "Home checkout"
+    project_id = link_checkout(call, project, checkout)
+    (checkout / FILENAME).write_text("Home copy", encoding="utf-8")
+    panel = call("chat_action_dashboard")
+    msg, = panel["inbox"]
+    assert msg["name"] == "Work" and msg["note"] == HANDOFF_NOTE, msg
+    assert msg["thread"] == find_chat(app, NAME) and msg["item"]
+    reply = call("read_handoff_reply", thread=msg["thread"], turn=msg["turn"], item=msg["item"])
+    answer, ref = reply["text"].splitlines()
+    assert answer == "Birch metadata verified." and ref.endswith(FILENAME + ":12:3"), reply
+    local = call("open_linked_file", thread=msg["thread"], reference=ref)
+    assert Path(local["path"]) == checkout / FILENAME and local["text"] == "Home copy", local
+    assert set(panel["globalRules"]) == {project_id + "/all-desktops"}, panel["globalRules"]
+    assert not panel["folders"], panel["folders"]
+    call("dismiss_reply_handoff", sender=msg["sender"], request=msg["id"])
+    assert not call("chat_action_dashboard")["inbox"]
+    print("Verified the Work handoff, exact reply, linked local file and both folder scopes on Home.")
+
+
+def exercise(stage, vault, incoming, home, device_state):
     cli = os.environ.get("CODEX_CHAT_SYNC_CLI", "codex")
     subprocess.run([cli, "plugin", "marketplace", "add", str(REPO)], check=True)
     subprocess.run([cli, "plugin", "add", "chat-sync@capronicus-desktop-mods"], check=True)
@@ -126,7 +182,19 @@ def exercise(stage, vault, incoming, home):
         call = plugin(app)
         assert call("chat_sync_status")["configured"] is False
         assert not (home / "chat-sync/config.json").exists()
+        if stage == "receive":
+            # Restore only the synthetic Home device's normal reconnect record on this runner.
+            saved = json.loads(device_state.read_bytes())
+            remembered, = saved["devices"].values()
+            saved["devices"] = {str(vault): remembered}
+            path = home / "chat-sync/disconnected.json"
+            path.parent.mkdir(exist_ok=True)
+            path.write_text(json.dumps(saved), encoding="utf-8")
         call("configure_chat_sync", folder=str(vault), automatic=False)
+        if stage == "receive":
+            assert call("chat_sync_status")["device"] == remembered["device"]
+            receive_work_reply(app, call, home)
+            return
         if stage in ("seed", "reply"):
             name, emoji = ("Home", "🏠") if stage == "seed" else ("Work", "💼")
             call("set_sync_device_label", name=name, emoji=emoji)
@@ -162,6 +230,9 @@ def exercise(stage, vault, incoming, home):
             assert "THIS-MUST-STAY-LOCAL" not in head.read_text()
             shared = next((vault / "codex-chat-sync-v1/sidebar-v1").glob("*.json")).read_text()
             assert str(ROOT) not in shared and "LOCAL PROJECT METADATA" not in shared
+            if device_state:
+                call("disable_chat_sync")
+                shutil.copyfile(home / "chat-sync/disconnected.json", device_state)
             return
         if stage == "reply":
             other = start(app)
@@ -194,8 +265,7 @@ def exercise(stage, vault, incoming, home):
             app.call("thread/section/move", {"threadId":tid, "sectionId":None})
             app.call("thread/section/move", {"threadId":other, "sectionId":section["id"]})
             desktop_colours("reply", tid)
-            app.turn(tid, SECOND)
-            assert sync(call)["exported"] >= 1
+            send_work_reply(app, call, tid, project, home.parent / "Work checkout")
             return
         # Reconstruct the Linux device's initial view using only the seed vault.
         start(app)
@@ -204,6 +274,7 @@ def exercise(stage, vault, incoming, home):
         assert FIRST in history(app, tid)
         shutil.copytree(incoming, vault, dirs_exist_ok=True)
         result = sync(call)
+        assert not call("chat_action_dashboard")["inbox"], "Handoff appeared on an unrelated device"
         assert result["busy"] >= 1 and result["updated"] == 0, result
         assert result["settings"]["applied"] == 3, result["settings"]
         values = desktop()
@@ -235,9 +306,10 @@ def exercise(stage, vault, incoming, home):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("stage", choices=["seed", "reply", "verify"])
+    parser.add_argument("stage", choices=["seed", "reply", "verify", "receive"])
     parser.add_argument("vault", type=Path, help="Disposable synthetic shared directory")
     parser.add_argument("--incoming", type=Path)
+    parser.add_argument("--device-state", type=Path, help="Separate synthetic Home reconnect record for seed/receive")
     args = parser.parse_args()
     vault = args.vault.resolve()
     if args.stage == "seed":
@@ -246,11 +318,15 @@ def main():
         parser.error("Expected a vault from the previous test stage.")
     if args.stage == "verify" and not args.incoming:
         parser.error("verify requires the reply-stage vault in --incoming")
+    if args.stage == "receive" and not args.device_state:
+        parser.error("receive requires the seed device's --device-state")
     env_root = tempfile.TemporaryDirectory(prefix="chat-sync-test-", ignore_cleanup_errors=True)
     with env_root as root:
         user = Path(root)
         home = user / ".codex"
         os.environ.update(HOME=str(user), USERPROFILE=str(user), CODEX_HOME=str(home))
+        if args.stage == "reply":
+            os.environ["CHAT_SYNC_FIXTURE_REFERENCE"] = str(user / "Work checkout" / FILENAME) + ":12:3"
         model = subprocess.Popen(
             ["node", "-e",
              "require('./fake-model.cjs')().then(p=>{console.log(p);setInterval(()=>{},60000)})"],
@@ -258,7 +334,7 @@ def main():
         )
         try:
             prepare(home, int(model.stdout.readline()))
-            exercise(args.stage, vault, args.incoming, home)
+            exercise(args.stage, vault, args.incoming, home, args.device_state)
         except Exception:
             log = home / "qa.log"
             if log.exists():
