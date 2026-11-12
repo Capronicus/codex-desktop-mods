@@ -55,6 +55,15 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 <details id="performance"><summary>Desktop responsiveness</summary><button id="perf-start">Check responsiveness</button><p id="perf-result"></p></details>
 <div id="action-content" aria-live="polite"></div><button id="actions-refresh">Refresh chat actions</button>
 </details></section>
+<section><details id="group-editor"><summary>Organize projects and sections</summary>
+<p>Changes apply on this PC after you fully quit the desktop app.</p>
+<p><label>Action <select id="group-action"><option value="create">Create subsection</option><option value="move">Move section</option><option value="promote">Convert section to project</option><option value="demote">Convert project to section</option></select></label></p>
+<p id="group-source-row"><label>Group <select id="group-source"></select></label></p>
+<p id="group-parent-row"><label>Place in <select id="group-parent"></select></label></p>
+<p id="group-name-row"><label>Subsection name <input id="group-name" maxlength="150"></label></p>
+<p id="group-folder-row"><label>Project folder (optional) <input id="group-folder" placeholder="Keep existing folder"></label></p>
+<button id="group-save">Save change</button> <button id="group-cancel" hidden>Cancel pending change</button> <button id="group-retry" hidden>Retry change</button>
+<p id="group-feedback" role="status"></p></details></section>
 <section id="sidebar-review" hidden><h2>Sidebar changes</h2>
 <p id="sidebar-status"></p>
 <div class="actions"><button id="preview-sidebar" disabled>Preview changes</button>
@@ -330,7 +339,7 @@ el('undo-sidebar').onclick=()=>act('undo_sidebar_batch',{batch:state.sidebarRevi
   result.undo_on_quit?'Fully quit the app to finish undoing the last sidebar batch.':'Sidebar restored. Project, section and order sync are off on this desktop.');
 async function connect(){
   try{
-    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.12.1'},appCapabilities:{},protocolVersion:'2026-01-26'});
+    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.13.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
     theme(host.hostContext);send({method:'ui/notifications/initialized',params:{}});
     new ResizeObserver(()=>send({method:'ui/notifications/size-changed',params:{height:document.querySelector('main').offsetHeight}})).observe(document.querySelector('main'));
     working=false;await act();if(typeof loadActions==='function')await loadActions();

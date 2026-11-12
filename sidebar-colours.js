@@ -520,7 +520,9 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     const id=kind==='chat'?key.replace(/^(?:codex:thread:)?local:/,''):key;
     if (!/^[0-9a-f-]{36}$/.test(id)) return [];
     const project=kind==='project';
-    return [{id:'chat-sync-'+kind,message:{id:'local.chatActions.'+kind,
+    const organize=project?[{id:'project-organize',message:{id:'local.sidebarGroups.project',defaultMessage:'Organize project…'},
+      onSelect:()=>window.localChatDetails.openModControls({action:'organize',project:id})}]:[];
+    return [...organize,{id:'chat-sync-'+kind,message:{id:'local.chatActions.'+kind,
       defaultMessage:project?'Project sharing…':'Chat branches…'},
       onSelect:()=>window.localChatDetails.openModControls(project?{action:'project',project:id}:{action:'family',thread:id})}];
   }

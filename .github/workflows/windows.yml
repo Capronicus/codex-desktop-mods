@@ -1,6 +1,12 @@
 name: Windows desktop mods
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'sidebar-*.js'
+      - 'sidebar-colours.py'
+      - 'renderer_updates.py'
+      - 'chat-details-*.cjs'
   push:
     branches: [main, codex/device-chat-actions, windows-port, codex/sidebar-palette, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/pet-controls, codex/recover-desktop-metadata]
 permissions:

@@ -25,6 +25,7 @@ jobs:
       - run: python3 plugins/chat-sync/tests/mod_controls.py
       - run: python3 plugins/chat-sync/tests/integrity_test.py
       - run: python3 plugins/chat-sync/tests/chat_actions.py
+      - run: python3 plugins/chat-sync/tests/sidebar_groups.py
       - run: python3 plugins/chat-sync/tests/sidebar_layout_test.py
       - run: python3 plugins/chat-sync/tests/cross_platform.py seed "$RUNNER_TEMP/seed" --device-state "$RUNNER_TEMP/home-device.json"
       - uses: actions/upload-artifact@v4
@@ -67,6 +68,7 @@ jobs:
       - run: python plugins/chat-sync/tests/mod_controls.py
       - run: python plugins/chat-sync/tests/integrity_test.py
       - run: python plugins/chat-sync/tests/chat_actions.py
+      - run: python plugins/chat-sync/tests/sidebar_groups.py
       - run: python plugins/chat-sync/tests/sidebar_layout_test.py
       - run: python plugins/chat-sync/tests/cross_platform.py reply "$env:RUNNER_TEMP/transfer"
       - uses: actions/upload-artifact@v4

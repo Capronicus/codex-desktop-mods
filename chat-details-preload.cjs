@@ -3,6 +3,7 @@
   const {contextBridge, ipcRenderer} = require('electron');
   contextBridge.exposeInMainWorld('localChatDetails', {
     visuals: ipcRenderer.sendSync('local-mod-controls:visuals'),
+    subsectionParents: ipcRenderer.sendSync('local-sidebar:parents'),
     openModControls: async context => {
       if (context) await ipcRenderer.invoke('local-chat-actions:context', context);
       return ipcRenderer.invoke('codex_desktop:message-from-view', {
