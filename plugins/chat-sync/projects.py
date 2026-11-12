@@ -18,28 +18,35 @@ def valid_id(value):
     return isinstance(value, str) and sync.UUID.fullmatch(value) is not None
 
 
-def local_projects(home):
+def local_projects(home, *, native_ids=None):
     import desktop_layout
 
     layout = desktop_layout.Layout(home)
+    result = {}
     if layout.enabled:
-        return {
+        result = {
             k: {"name": v["name"], "folders": v.get("rootPaths", [])}
             for k, v in layout.projects.items()
             if valid_id(k)
         }
+        if native_ids is None:
+            return result
     catalogue = home / "state_5.sqlite"
     if not catalogue.is_file():
-        return {}
+        return result
     with closing(sqlite3.connect(catalogue.as_uri() + "?mode=ro", uri=True)) as db:
         if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='projects'").fetchone():
-            return {}
+            return result
         import json
 
-        return {
-            json.loads(meta).get("codex.localProjectId", k): {"name": name, "folders": []}
-            for k, name, meta in db.execute("SELECT id,name,metadata FROM projects")
-        }
+        for ident, name, meta in db.execute("SELECT id,name,metadata FROM projects"):
+            original = json.loads(meta or "{}").get("codex.localProjectId")
+            stable = original if valid_id(original) else ident
+            if native_ids is not None and stable != ident:
+                native_ids[ident] = stable
+            if not layout.enabled:
+                result[stable] = {"name": name, "folders": []}
+    return result
 
 
 def peer_file(path):
@@ -198,7 +205,8 @@ class Sharing:
             import desktop_layout
 
             layout = desktop_layout.Layout(home)
-            projects = local_projects(home)
+            aliases = {}
+            projects = local_projects(home, native_ids=aliases)
             links = self.links = Links(cfg, vault, projects)
             self.shared_rules = sharing_rules.canonical(rules,links)
             roots = self.roots = sharing_rules.project_roots(cfg,projects,links)
@@ -215,7 +223,7 @@ class Sharing:
                 self.private_chats.update(threads)
                 if not relative:self.private_projects.add(pid)
                 if pid in roots:self.excluded_folders.append(str(roots[pid]/relative))
-            aliases = {v: k for k, v in layout.project_ids.items()}
+            aliases.update({v: k for k, v in layout.project_ids.items()})
             self.private_projects = {links.wire(i) for i in self.private_projects}
             shared = {
                 k.split("/")[1]: r[2]

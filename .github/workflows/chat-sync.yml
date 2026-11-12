@@ -1,6 +1,10 @@
 name: Chat sync across Linux and Windows
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'plugins/chat-sync/**'
+      - '.github/workflows/chat-sync.yml'
   push:
     branches: [main, codex/device-chat-actions, codex/chat-sync, codex/sidebar-palette, codex/sidebar-sync, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/sync-repair, codex/pet-controls, codex/defer-busy-recovery, codex/sidebar-review-panel, codex/outgoing-chat-preview]
     paths:
@@ -22,7 +26,12 @@ jobs:
       - run: python3 plugins/chat-sync/tests/integrity_test.py
       - run: python3 plugins/chat-sync/tests/chat_actions.py
       - run: python3 plugins/chat-sync/tests/sidebar_layout_test.py
-      - run: python3 plugins/chat-sync/tests/cross_platform.py seed "$RUNNER_TEMP/seed"
+      - run: python3 plugins/chat-sync/tests/cross_platform.py seed "$RUNNER_TEMP/seed" --device-state "$RUNNER_TEMP/home-device.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-home-device
+          path: ${{ runner.temp }}/home-device.json
+          retention-days: 1
       - uses: actions/upload-artifact@v4
         with:
           name: synthetic-linux-history
@@ -81,3 +90,8 @@ jobs:
           name: synthetic-windows-reply
           path: ${{ runner.temp }}/transfer
       - run: python3 plugins/chat-sync/tests/cross_platform.py verify "$RUNNER_TEMP/seed" --incoming "$RUNNER_TEMP/transfer"
+      - uses: actions/download-artifact@v4
+        with:
+          name: synthetic-home-device
+          path: ${{ runner.temp }}/identity
+      - run: python3 plugins/chat-sync/tests/cross_platform.py receive "$RUNNER_TEMP/transfer" --device-state "$RUNNER_TEMP/identity/home-device.json"

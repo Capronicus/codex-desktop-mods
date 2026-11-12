@@ -230,7 +230,7 @@ def handle(req):
         version = params.get("protocolVersion")
         return {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[0],
-            "serverInfo": {"name": "chat-sync", "version": "0.12.0"},
+            "serverInfo": {"name": "chat-sync", "version": "0.12.1"},
             "capabilities": {"tools": {}, "resources": {}},
         }
     if method == "ping":

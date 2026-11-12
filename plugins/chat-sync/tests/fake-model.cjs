@@ -5,7 +5,8 @@ module.exports=async function start(){
    if(!req.url.includes('/responses')){res.writeHead(200,{'content-type':'application/json'});res.end('{"data":[]}');return;}
    const raw=Buffer.concat(chunks).toString();
    const second=raw.includes('Second metadata check');
-   const answer=second?'Birch metadata verified.':'Cedar metadata verified.';
+   const reference=process.env.CHAT_SYNC_FIXTURE_REFERENCE;
+   const answer=second?'Birch metadata verified.'+(reference?'\n'+reference:''):'Cedar metadata verified.';
    const id='resp_'+Date.now(),message={id:'msg_'+Date.now(),type:'message',status:'completed',role:'assistant',phase:'final_answer',content:[{type:'output_text',text:answer,annotations:[]}]};
    const response={id,object:'response',created_at:Math.floor(Date.now()/1000),model:'offline-test',status:'completed',output:[message],usage:{input_tokens:second?200:100,input_tokens_details:{cached_tokens:20},output_tokens:second?25:15,output_tokens_details:{reasoning_tokens:5},total_tokens:second?225:115}};
    res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache'});
