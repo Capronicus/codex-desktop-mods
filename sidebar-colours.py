@@ -27,7 +27,7 @@ ASSET = 'app-primary-f921a74f3eba.js'
 ORIGINAL_HASH = '43c553113064956188f435bd0ce433aa46dad054aeb8e9919c2495b0482182a0'
 MOD_FILES = ('sidebar-colours.py', 'sidebar-colours.js', 'chat-details-main.cjs',
              'chat-details-preload.cjs', 'chat-details.js', 'chat-details-cloud.js',
-             'renderer_updates.py', 'renderer-modules.json', 'chat-layout.js')
+             'renderer_updates.py', 'renderer-modules.json', 'chat-layout.js', 'sidebar-nesting.js')
 TRANSCRIPT = 'virtualized-turn-list-849fe48ea6b5.js'
 CLOUD_TRANSCRIPT = 'chatgpt-conversation-turn-content-48014b7b6a96.js'
 
@@ -39,7 +39,8 @@ def subst(source, old, new, count=1):
 
 
 def modify(js):
-    from renderer_updates import section_colour_action
+    from renderer_updates import section_colour_action, nest_sections
+    js = nest_sections(js, (SOURCE/'sidebar-nesting.js').read_text(encoding='utf-8'), legacy=True)
     section_marker = '{id:`section-chat-actions-separator`,type:`separator`}'
     js = subst(js, section_marker, section_colour_action('d') + section_marker)
     # The renderer's own selector resolves the membership of a keyed thread, even

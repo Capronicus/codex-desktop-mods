@@ -29,7 +29,7 @@ The panel can also toggle wider chats, the pet dock, scroll animation, timestamp
 
 ## Chat actions on Home and Work
 
-Both plugins need version 0.12.0 on each participating PC. The desktop menus require the patched launcher. Open **Mod Controls → Chat actions and sharing** for these actions.
+Use version 0.13.0 of both plugins on each participating PC. The desktop menus require the patched launcher. Open **Mod Controls → Chat actions and sharing** for these actions.
 
 - **Open local copy**. Link the receiving project to its checkout. Sync the original desktop with sidebar sync or project linking enabled, then let your folder client finish. Right-click a file reference in a local reply. Preview the file under the receiving checkout, open text files in an editor, or show the folder. If the original project root is unknown, enter the project-relative path. The plugin shares hashes of eligible project roots to match Windows and Linux paths. Files stay on their own computers.
 - **Hand off this reply**. After both desktops have synced once, right-click the reply on Work, select Home, add an optional note and click **Send handoff**. On Home open the pet’s **Reply handoffs** menu or the panel’s inbox. **Read reply** shows the saved message, **Open in chat** navigates to it and **Done** removes it from this PC’s inbox. If history arrives later, the handoff remains available for retry. The note and message identifiers travel through the configured private folder.

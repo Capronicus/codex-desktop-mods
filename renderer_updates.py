@@ -153,7 +153,31 @@ def adapt(role, source, files, pet_assets):
 
 def section_colour_action(section):
     return ('{id:"section-colour",message:{id:"local.sidebarColours.section",defaultMessage:"Section colour…"},'
-            'onSelect:()=>window.dispatchEvent(new CustomEvent("csc-open-section-colour",{detail:'+section+'.id}))},')
+            'onSelect:()=>window.dispatchEvent(new CustomEvent("csc-open-section-colour",{detail:'+section+'.id}))},'
+            '{id:"section-organize",message:{id:"local.sidebarGroups.section",defaultMessage:"Organize section…"},'
+            'onSelect:()=>window.localChatDetails?.openModControls({action:"organize",section:'+section+'.id})},')
+
+
+def nest_sections(source, helper, legacy=False):
+    anchor = 'className:' + ('`' if legacy else '"') + '-mb-4 pb-4 browser:-mb-5 browser:pb-5'
+    matches = []
+    for m in re.finditer(re.escape(anchor) + r'[`"],containerId:\w+,children:\w+\}', source):
+        start = source.rfind('function ', 0, m.start())
+        end = source.find('}function ', m.end())
+        body = source[start:end]
+        if 0 < len(body) < 5000 and '`custom:${' in body and 'sectionReorderDnd:' in body:
+            matches.append((start,end,body))
+    if len(matches) != 1:
+        raise ValueError('Unrecognised desktop custom section renderer')
+    start, end, body = matches[0]
+    react = re.search(r'\(0,([\w$]+)\.useRef\)\(null\)', body)[1]
+    section = re.search(r'`custom:\$\{([\w$]+)\.id\}', body)[1]
+    node = re.search(r',([\w$]+)$', body)[1]
+    portal = 'Qs().createPortal' if legacy else 'n("v7qY").createPortal'
+    key = f'window.localChatDetails?.subsectionParents?.[{section}.id]'
+    new = f'{key}?{react}.createElement(cscNestedGroup,{{React:{react},portal:cscSectionPortal,section:{section}.id,parents:{key}}},{node}):{node}'
+    bridge = f'function cscSectionPortal(child,host){{return {portal}(child,host)}}'
+    return helper+'\n'+source[:start]+bridge+source[start:end-len(node)]+new+source[end:]
 
 
 def add_pet_controls(data):
@@ -223,6 +247,8 @@ def renderer_patches(directory, read, source, pet_assets):
             menu = rb'(\{id:"edit-section",message:\w+\.edit,icon:[\w.]+,onSelect:\(\)=>[^{}]{1,90}\{section:(\w+)\}\)\},)(?=\{id:"section-chat-actions-separator")'
             original, hits = re.subn(menu,lambda m:m[1]+section_colour_action(m[2].decode()).encode(),original)
             section_count += hits
+            if hits:
+                original = nest_sections(original.decode(), (source/'sidebar-nesting.js').read_text(encoding='utf-8')).encode()
         patched = add_pet_controls(original) if b'{id:"pet-settings"' in original else original
         if edits or section_menu or patched is not original:
             yield entry,patched

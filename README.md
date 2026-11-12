@@ -37,9 +37,19 @@ Install **Codex Chat Sync** from the same marketplace, then open **Mod Controls*
 
 The six appearance switches work without connecting a folder.
 
+## Project subsections and group conversions
+
+With **Codex Desktop Mods** and **Codex Chat Sync 0.13.0** installed on this desktop, right-click a local project or a custom section and choose **Organize project…** or **Organize section…**. The same controls are in **Mod Controls → Organize projects and sections**. These local actions work with chat sync disconnected.
+
+- Choose **Create subsection** to add a named group inside a project. The section follows the project's expand and collapse control. Use the usual section menu to add chats.
+- Choose **Convert section to project** to create a real local Codex project and move its local chats there. You can supply a folder. A previously demoted project restores its saved folder paths.
+- Choose **Convert project to section** and select **Top-level sections** or another local project. **Move section** also moves an existing section between those locations. Cloud items in a promoted mixed section stay together in a subsection.
+
+Click **Save change**, fully quit the desktop (including its tray window), and reopen it. The conversion uses Codex's project and chat APIs. Parent placement and remembered folder paths are specific to this desktop.
+
 ## Files, reply handoffs and chat actions
 
-Update **Codex Desktop Mods** and **Codex Chat Sync** to **0.12.0** on both PCs, apply the desktop mods, then fully quit and reopen the app. Right-click a local assistant reply for **Open local copy** or **Hand off this reply**. Shift + right-click keeps the regular text menu. Right-click a local sidebar chat for **Chat branches** or a project for **Project sharing**.
+Update **Codex Desktop Mods** and **Codex Chat Sync** to **0.13.0** on both PCs, apply the desktop mods, then fully quit and reopen the app. Right-click a local assistant reply for **Open local copy** or **Hand off this reply**. Shift + right-click keeps the regular text menu. Right-click a local sidebar chat for **Chat branches** or a project for **Project sharing**.
 
 Open **Mod Controls → Chat actions and sharing** for the handoff inbox, conflict comparison, project or folder exclusions and the 12-second desktop responsiveness check. [Using chat actions on Home and Work](plugins/chat-sync/README.md#chat-actions-on-home-and-work)
 

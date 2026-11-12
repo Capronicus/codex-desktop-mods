@@ -28,7 +28,12 @@ async function loadActions() {
     dashboardState=data;
     const ctx=data.context;
     if(ctx.id && ctx.id!==activeRequest){
-      activeRequest=ctx.id;el('chat-actions').open=true;
+      activeRequest=ctx.id;
+      if(ctx.action==='organize'){
+        el('group-editor').open=true;
+        await loadGroups(ctx);
+        el('group-editor').scrollIntoView({block:'start'});
+      }else el('chat-actions').open=true;
       const section=({handoff:'send-handoff',file:'file-copy',family:'branches',project:'exclude-project',inbox:'handoff-inbox',performance:'performance',conflicts:'conflict-preview'})[ctx.action];
       if(section)el(section).open=true;
       el('file-reference').value=ctx.reference||'';
@@ -145,3 +150,52 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden && state)l
 window.addEventListener('message',event=>{
   if(event.source===parent && event.data?.method==='ui/notifications/tool-result' && state)loadActions();
 });
+
+let groupData;
+function renderGroupAction() {
+  if (!groupData) return;
+  const mode=el('group-action').value, source=el('group-source'), parent=el('group-parent');
+  const lastSource=source.value, lastParent=parent.value;
+  const groups=mode==='demote'?groupData.projects:groupData.sections;
+  selectValues(source,Object.entries(groups));
+  if(Object.hasOwn(groups,lastSource))source.value=lastSource;
+  const choices=Object.entries(groupData.projects).filter(([id])=>mode!=='demote'||id!==source.value);
+  if(mode!=='create')choices.unshift(['','Top-level sections']);
+  selectValues(parent,choices);
+  if(choices.some(([id])=>id===lastParent))parent.value=lastParent;
+  el('group-source-row').hidden=mode==='create';
+  el('group-parent-row').hidden=mode==='promote';
+  el('group-name-row').hidden=mode!=='create';
+  el('group-folder-row').hidden=mode!=='promote';
+  el('group-save').disabled=!groupData.ready||!!groupData.pending||(mode==='create'?!parent.value:!source.value);
+  el('group-cancel').hidden=!groupData.pending||groupData.started;
+  el('group-retry').hidden=!groupData.error;
+}
+async function loadGroups(ctx={}) {
+  try {
+    groupData=await call('sidebar_group_inventory');
+    if(ctx.project)el('group-action').value='create';
+    if(ctx.section)el('group-action').value='promote';
+    renderGroupAction();
+    if(ctx.project && Object.hasOwn(groupData.projects,ctx.project))el('group-parent').value=ctx.project;
+    if(ctx.section && Object.hasOwn(groupData.sections,ctx.section))el('group-source').value=ctx.section;
+    el('group-feedback').textContent=groupData.error || (groupData.pending?'Queued: '+groupData.pending+'. Fully quit and reopen the app.':
+      groupData.ready?'':'Sign in to the desktop to organize local projects and custom sections.');
+  }catch(error){el('group-feedback').textContent=error.message;}
+}
+el('group-editor').ontoggle=()=>{if(el('group-editor').open && !groupData)loadGroups();};
+el('group-action').onchange=renderGroupAction;
+el('group-source').onchange=renderGroupAction;
+async function saveGroup(action) {
+  const save=el('group-save');save.disabled=true;
+  try {
+    const mode=el('group-action').value;
+    await call('change_sidebar_group', {action:action||mode,source:mode==='create'?'':el('group-source').value,
+      parent:mode==='promote'?'':el('group-parent').value,name:mode==='create'?el('group-name').value.trim():'',
+      folder:mode==='promote'?el('group-folder').value.trim():''});
+    await loadGroups();
+  }catch(error){renderGroupAction();el('group-feedback').textContent=error.message;}
+}
+el('group-save').onclick=()=>saveGroup();
+el('group-cancel').onclick=()=>saveGroup('cancel');
+el('group-retry').onclick=()=>saveGroup('retry');

@@ -16,6 +16,7 @@ import integrity
 import outgoing
 import chat_actions
 import sharing_rules
+import hierarchy
 
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 STOP = threading.Event()
@@ -192,6 +193,8 @@ ACTIONS = {
 
 # Actions called by the interactive Mod Controls view.
 for name, fn, required, optional, readonly in (
+    ("sidebar_group_inventory", hierarchy.inventory, (), (), True),
+    ("change_sidebar_group", hierarchy.change, ("action",), ("source","parent","name","folder"), False),
     ("chat_action_dashboard", chat_actions.dashboard, (), (), True),
     ("open_linked_file", chat_actions.open_file, ("thread","reference"), (), True),
     ("edit_linked_file", chat_actions.edit_file, ("thread","reference"), (), False),
@@ -230,7 +233,7 @@ def handle(req):
         version = params.get("protocolVersion")
         return {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[0],
-            "serverInfo": {"name": "chat-sync", "version": "0.12.1"},
+            "serverInfo": {"name": "chat-sync", "version": "0.13.0"},
             "capabilities": {"tools": {}, "resources": {}},
         }
     if method == "ping":

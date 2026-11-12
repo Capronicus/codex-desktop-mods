@@ -355,10 +355,10 @@
     } finally { await fs.unlink(tmp).catch(()=>{}); }
   }
   ipcMain.handle('local-chat-actions:context', async (event, input) => {
-    if (!primaryFrame(event) || !input || !['handoff','inbox','file','family','project','conflicts','performance'].includes(input.action))
+    if (!primaryFrame(event) || !input || !['handoff','inbox','file','family','project','organize','conflicts','performance'].includes(input.action))
       throw new Error('Unavailable desktop action.');
     const ctx = {action:input.action,id:require('node:crypto').randomUUID(),at:Date.now()};
-    for (const key of ['thread','turn','project']) if (typeof input[key]==='string' && idPattern.test(input[key])) ctx[key]=input[key];
+    for (const key of ['thread','turn','project','section']) if (typeof input[key]==='string' && idPattern.test(input[key])) ctx[key]=input[key];
     for (const [key,limit] of [['reference',4096],['item',160]]) if (typeof input[key]==='string') ctx[key]=input[key].slice(0,limit);
     await saveAction('desktop-request.json',ctx);
   });
@@ -372,6 +372,17 @@
     await saveAction('desktop-performance.json',value);
   });
   const clients=new Set();
+  ipcMain.on?.('local-sidebar:parents', event => {
+    const parents = {};
+    if (primaryFrame(event)) try {
+      const data = JSON.parse(require('node:fs').readFileSync(path.join(home,'.codex-global-state.json'),'utf8'));
+      const scoped = data['codex-mods-sidebar-groups-v1']?.[colourAccount()]?.parents || {};
+      const aliases = data['app-server-project-id-by-legacy-project-id-by-host']?.['local:'+home] || {};
+      for (const [section, project] of Object.entries(scoped)) if (idPattern.test(section) && idPattern.test(project))
+        parents[section] = [project,aliases[project]].filter(Boolean);
+    } catch { /* A fresh profile has no nested sections. */ }
+    event.returnValue = parents;
+  });
   let watcher;
   async function dispatchCommand(){
     const targets=[...clients].filter(w=>!w.isDestroyed());
