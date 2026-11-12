@@ -43,6 +43,24 @@ def root_key(root):
     return hashlib.sha256(name.encode()).hexdigest()
 
 
+def root_keys(folder):
+    paths = [folder]
+    if os.name == "nt":
+        # Shells and desktop links can use the 8.3 spelling of an ancestor.
+        import ctypes
+        short_name = ctypes.windll.kernel32.GetShortPathNameW
+        length = short_name(str(folder), None, 0)
+        if length:
+            buf = ctypes.create_unicode_buffer(length)
+            if 0 < short_name(str(folder), buf, length) < length:
+                short = PureWindowsPath(buf.value)
+                long = PureWindowsPath(folder)
+                if len(long.parts) == len(short.parts):
+                    paths.extend(str(PureWindowsPath(*short.parts[:n], *long.parts[n:]))
+                                 for n in range(1, len(short.parts) + 1))
+    return {root_key(source_path(path)) for path in paths}
+
+
 def publish_roots(cfg, vault):
     local = projects.local_projects(sync.HOME)
     links = projects.Links(cfg, vault, local)
@@ -57,7 +75,7 @@ def publish_roots(cfg, vault):
         # A relative suffix is ambiguous across multiple different roots.
         for folder in folders if len(folders) == 1 else ():
             if folder and Path(folder).is_absolute() and not projects.folder_excluded(folder, cfg):
-                rows.setdefault(wire, set()).add(root_key(source_path(folder)))
+                rows.setdefault(wire, set()).update(root_keys(folder))
     data = {pid: sorted(values) for pid, values in rows.items()}
     path = vault / "file-roots-v1" / (cfg["device"] + ".json")
     if data or path.exists():
