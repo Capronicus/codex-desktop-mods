@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'plugins/chat-sync/**'
+      - 'chat-details-main.cjs'
       - '.github/workflows/chat-sync.yml'
   push:
     branches: [main, codex/device-chat-actions, codex/chat-sync, codex/sidebar-palette, codex/sidebar-sync, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/sync-repair, codex/pet-controls, codex/defer-busy-recovery, codex/sidebar-review-panel, codex/outgoing-chat-preview]
@@ -11,6 +12,7 @@ on:
       - '.agents/plugins/marketplace.json'
       - '.github/workflows/chat-sync.yml'
       - 'plugins/chat-sync/**'
+      - 'chat-details-main.cjs'
 permissions:
   contents: read
 jobs:

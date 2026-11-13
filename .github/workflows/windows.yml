@@ -4,9 +4,16 @@ on:
   pull_request:
     paths:
       - 'sidebar-*.js'
+      - 'chat-*.js'
       - 'sidebar-colours.py'
+      - 'windows_mods.py'
       - 'renderer_updates.py'
+      - 'renderer-modules.json'
       - 'chat-details-*.cjs'
+      - 'manager.py'
+      - 'server.py'
+      - 'tests/**'
+      - '.github/workflows/windows.yml'
   push:
     branches: [main, codex/device-chat-actions, windows-port, codex/sidebar-palette, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/pet-controls, codex/recover-desktop-metadata]
 permissions:
