@@ -49,7 +49,7 @@ def apply(layout, changes):
                and k in current and current[k] in (old,v)}
     if not updates: return {}
     merged = {**edges, **updates}
-    issues = invalid_edges(merged, set(edges), {k for k,p in layout.projects.items() if not p.get("chatGptBacking")})
+    issues = invalid_edges(merged, set(edges), set(layout.subsection_projects()))
     # Keep the previous tree if a concurrent move would break a branch.
     if issues - invalid_edges(edges, set(edges), set(layout.projects)) or issues.intersection(updates):
         return {}

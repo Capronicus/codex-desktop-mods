@@ -96,9 +96,9 @@ def modify(js):
     # Read the prop at the top: the block patched below declares its own `let e`,
     # so `e.projectId` inside it throws "Cannot access 'e' before initialization".
     js = subst(js, 'function qJn(e){"use forget";let t=(0,XJn.c)(59)',
-               'function qJn(e){"use forget";let cscProjectId=e.projectId,t=(0,XJn.c)(60)')
+               'function qJn(e){"use forget";let cscProjectId=e.projectId,cscLinked=e.linkedLocalProjectId,t=(0,XJn.c)(60)')
     js = subst(js, 't[16]!==E){if(D=[{id:C,message:w,icon:T,onSelect:E},',
-               't[16]!==E||t[59]!==cscProjectId){t[59]=cscProjectId;if(D=[sidebarColours.menuItem("project",cscProjectId),...sidebarColours.actionItems("project",cscProjectId),'
+               't[16]!==E||t[59]!==cscProjectId){t[59]=cscProjectId;if(D=[sidebarColours.menuItem("project",cscProjectId),...sidebarColours.actionItems("project",cscProjectId??cscLinked,cscLinked),'
                '{id:C,message:w,icon:T,onSelect:E},')
     # Module declarations/imports remain at top level. The code runs before the
     # first call of an exported lazy component, independently of load order.

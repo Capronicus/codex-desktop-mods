@@ -121,6 +121,24 @@ class SidebarGroups(unittest.TestCase):
                         self.assertEqual(row["projectId"],lay.project_ids[key])
                         self.assertEqual(row["section"]["id"],lay.section_ids[two])
                         self.assertEqual(hierarchy.inventory()["parents"][two],"custom:"+one)
+                        backing = {"accountId":"fixture","projectId":"g-p-tartarus"}
+                        lay.data["local-projects"][key]["chatGptBacking"] = backing
+                        other = str(uuid.uuid4())
+                        lay.data["local-projects"][other] = {"name":"Other","chatGptBacking":{"accountId":"other"}}
+                        sync.atomic(lay.path,sync.encode(lay.data))
+                        self.assertIn(key,hierarchy.inventory()["projects"])
+                        self.assertNotIn(other,hierarchy.inventory()["projects"])
+                        with self.assertRaises(ValueError): hierarchy.change("demote",source=key)
+                        with self.assertRaises(ValueError): hierarchy.change("create",parent=other,name="Wrong account")
+                        lay=apply("create",parent=key,name="Linked subsection")
+                        sid=next(s["id"] for s in lay.sections if s["name"]=="Linked subsection")
+                        self.assertEqual(hierarchy.inventory()["parents"][sid],key)
+                        linked_section = next(s for s in lay.sections if s["id"] == sid)
+                        linked_section["itemKeys"] = ["chatgpt:project:" + backing["projectId"]]
+                        with self.assertRaisesRegex(ValueError, "Move the parent project out"):
+                            hierarchy.placement(lay, "move", sid, key)
+                        self.assertEqual(lay.projects[key]["chatGptBacking"],backing)
+                        self.assertEqual(lay.projects[key]["rootPaths"],[str(checkout)])
                         self.assertEqual(marker.read_text(),"untouched")
             finally:
                 model.terminate();model.wait();model.stdout.close()

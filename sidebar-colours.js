@@ -517,12 +517,16 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     if (!read('chat',stable)) edits.push(['chat/' + stable,old]);
     await write(edits).catch(() => {});
   }
-  function actionItems(kind,key) {
+  function actionItems(kind,key,linkedLocalId) {
     if (!window.localChatDetails?.openModControls || typeof key!=='string') return [];
-    const id=kind==='chat'?key.replace(/^(?:codex:thread:)?local:/,''):key;
-    if (!/^[0-9a-f-]{36}$/.test(id)) return [];
     const project=kind==='project';
-    const organize=project?[{id:'project-organize',message:{id:'local.sidebarGroups.project',defaultMessage:'Organize project…'},
+    const keys=window.localChatDetails.sidebarProjectKeys || {};
+    const id=project ? (keys[key] ?? keys[linkedLocalId] ?? linkedLocalId ?? key) : key.replace(/^(?:codex:thread:)?local:/,'');
+    if (!/^[0-9a-f-]{36}$/.test(id)) return [];
+    const organize=project?[{
+      id:'project-create-subsection',message:{id:'local.sidebarGroups.createSubsection',defaultMessage:'Create subsection…'},
+      selectAfterClose:true,onSelect:()=>window.localChatDetails.openModControls({action:'create-subsection',project:id})
+    },{id:'project-organize',message:{id:'local.sidebarGroups.project',defaultMessage:'Organize project…'},
       onSelect:()=>window.localChatDetails.openModControls({action:'organize',project:id})}]:[];
     return [...organize,{id:'chat-sync-'+kind,message:{id:'local.chatActions.'+kind,
       defaultMessage:project?'Project sharing…':'Chat branches…'},

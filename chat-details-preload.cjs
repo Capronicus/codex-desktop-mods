@@ -1,9 +1,11 @@
 ;(() => {
   if (!process.isMainFrame || location.protocol !== 'app:' || location.hostname !== '-') return;
   const {contextBridge, ipcRenderer} = require('electron');
+  const groups = ipcRenderer.sendSync('local-sidebar:groups');
   contextBridge.exposeInMainWorld('localChatDetails', {
     visuals: ipcRenderer.sendSync('local-mod-controls:visuals'),
-    subsectionParents: ipcRenderer.sendSync('local-sidebar:parents'),
+    subsectionParents: groups.parents,
+    sidebarProjectKeys: groups.projectKeys,
     openModControls: async context => {
       if (context) await ipcRenderer.invoke('local-chat-actions:context', context);
       return ipcRenderer.invoke('codex_desktop:message-from-view', {

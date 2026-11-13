@@ -39,6 +39,16 @@ class Layout:
             if (s.get("hostSectionIds") or {}).get("local")
         }
 
+    def subsection_projects(self):
+        # A linked project is still a local parent for this account's sidebar.
+        return {
+            key: project for key, project in self.projects.items()
+            if sync.UUID.fullmatch(key) and (
+                not project.get("chatGptBacking")
+                or self.account and project["chatGptBacking"].get("accountId") == self.account
+            )
+        }
+
     def observed(self, eligible):
         rows = {
             "project/" + k: v["name"]

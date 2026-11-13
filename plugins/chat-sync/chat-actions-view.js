@@ -29,10 +29,11 @@ async function loadActions() {
     const ctx=data.context;
     if(ctx.id && ctx.id!==activeRequest){
       activeRequest=ctx.id;
-      if(ctx.action==='organize'){
+      if(['organize','create-subsection'].includes(ctx.action)){
         el('group-editor').open=true;
         await loadGroups(ctx);
         el('group-editor').scrollIntoView({block:'start'});
+        if(ctx.action==='create-subsection' && el('group-parent').value)el('group-name').focus();
       }else el('chat-actions').open=true;
       const section=({bookmarks:'bookmarks','new-bookmark':'bookmarks',handoff:'send-handoff',file:'file-copy',family:'branches',project:'exclude-project',inbox:'handoff-inbox',performance:'performance',conflicts:'conflict-preview'})[ctx.action];
       if(section)el(section).open=true;
@@ -179,8 +180,8 @@ function renderGroupAction() {
   const lastSource=source.value, lastParent=parent.value;
   const groups=mode==='demote'?groupData.projects:groupData.sections;
   const sectionKeys=Object.keys(groupData.sections).map(id=>'custom:'+id);
-  selectValues(source,Object.keys(groups).map(id=>[id,groupLabel(mode==='demote'?id:'custom:'+id)]));
-  if(Object.hasOwn(groups,lastSource))source.value=lastSource;
+  selectValues(source,Object.keys(groups).filter(id=>mode!=='demote'||!groupData.linkedProjects?.includes(id)).map(id=>[id,groupLabel(mode==='demote'?id:'custom:'+id)]));
+  if([...source.options].some(option=>option.value===lastSource))source.value=lastSource;
   const root=['create','assign'].includes(mode)?null:mode==='demote'?source.value:'custom:'+source.value;
   const paths = sectionKeys.map(groupPath);
   const height=Math.max(1,...paths.filter(path=>path.includes(root)).map(path=>path.length-path.indexOf(root)));
@@ -197,7 +198,7 @@ function renderGroupAction() {
     if(!batchChats){batchChats=rows;selectValues(el('batch-chats'),Object.entries(rows));}
   }).catch(e=>{el('group-feedback').textContent=e.message;});
   el('batch-add').hidden=!['create','move','assign'].includes(mode);
-  el('batch-add').disabled=!groupData.ready||!!groupData.pending;
+  el('batch-add').disabled=!groupData.ready||!!groupData.pending||(['create','assign'].includes(mode)&&!parent.value);
   el('group-save').hidden=!!batchSteps.length || mode==='assign';
   el('group-parent-row').hidden=mode==='promote';
   el('group-name-row').hidden=mode!=='create';
@@ -212,7 +213,15 @@ async function loadGroups(ctx={}) {
     if(ctx.project)el('group-action').value='create';
     if(ctx.section)el('group-action').value=groupPath('custom:'+ctx.section).length<3?'create':'move';
     renderGroupAction();
-    if(ctx.project && Object.hasOwn(groupData.projects,ctx.project))el('group-parent').value=ctx.project;
+    if(ctx.project){
+      const parent = Object.hasOwn(groupData.projects,ctx.project) ? ctx.project : groupData.projectAliases?.[ctx.project];
+      el('group-parent').value=parent||'';
+      if(!parent){
+        el('group-save').disabled=el('batch-add').disabled=true;
+        el('group-feedback').textContent='This project is unavailable on this desktop. Choose a local parent to continue.';
+        return;
+      }
+    }
     if(ctx.section && Object.hasOwn(groupData.sections,ctx.section)){
       el('group-source').value=ctx.section;
       renderGroupAction();
@@ -223,9 +232,10 @@ async function loadGroups(ctx={}) {
       groupData.ready?'':'Sign in to the desktop to organize local projects and custom sections.');
   }catch(error){el('group-feedback').textContent=error.message;}
 }
-el('group-editor').ontoggle=()=>{if(el('group-editor').open && !groupData && dashboardState?.context?.action!=='organize')loadGroups();};
+el('group-editor').ontoggle=()=>{if(el('group-editor').open && !groupData && !['organize','create-subsection'].includes(dashboardState?.context?.action))loadGroups();};
 el('group-action').onchange=renderGroupAction;
 el('group-source').onchange=renderGroupAction;
+el('group-parent').onchange=renderGroupAction;
 async function saveGroup(action) {
   const save=el('group-save');save.disabled=true;
   try {

@@ -619,7 +619,9 @@ def conversation_records(vault, man):
 def latest_history(vault, choices, local):
     best = max(choices, key=lambda m: m["size"])
     if all(is_prefix(vault, m, best) for m in choices):
-        return best, bool(local and local["chunks"] == best["chunks"])
+        # Equal histories can carry different block names while a folder is being encrypted.
+        return best, bool(local and (local["chunks"] == best["chunks"]
+                                     or (local["size"] == best["size"] and is_prefix(vault, local, best))))
     # Most passes finish above without decompressing a complete chat.
     histories = {tuple(m["chunks"]): None for m in choices}
     for m in choices:

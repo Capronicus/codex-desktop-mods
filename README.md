@@ -48,7 +48,7 @@ The six appearance switches work without connecting a folder.
 
 ## Project subsections and group conversions
 
-With **Codex Desktop Mods** and **Codex Chat Sync 0.15.0** installed on this desktop, right-click a local project or a custom section and choose **Organize project…** or **Organize section…**. The same controls are in **Mod Controls → Organize projects and sections**. These local actions work with chat sync disconnected.
+With **Codex Desktop Mods** and **Codex Chat Sync 0.15.1** installed, right-click a project heading and choose **Create subsection…**. The organizer selects that project as the parent. Enter a name and choose **Save change**. This also works for a ChatGPT project linked to a local Codex project on the signed-in account. For more actions, choose **Organize project…** or **Organize section…**, or open **Mod Controls → Organize projects and sections**. These local actions work with chat sync disconnected.
 
 - Choose **Create subsection** to add a named group inside a project or custom section. The sidebar supports three levels, such as **Studio › Design › References**. A subsection collapses with either parent. Use the usual section menu to add chats.
 - Choose **Convert section to project** to create a real local Codex project and move its local chats there. You can supply a folder. A previously demoted project restores its saved folder paths.

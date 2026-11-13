@@ -430,10 +430,11 @@
     } finally { await fs.unlink(tmp).catch(()=>{}); }
   }
   ipcMain.handle('local-chat-actions:context', async (event, input) => {
-    if (!primaryFrame(event) || !input || !['handoff','inbox','file','family','project','organize','conflicts','performance','bookmarks','new-bookmark'].includes(input.action))
+    if (!primaryFrame(event) || !input || !['handoff','inbox','file','family','project','organize','create-subsection','conflicts','performance','bookmarks','new-bookmark'].includes(input.action))
       throw new Error('Unavailable desktop action.');
     const ctx = {action:input.action,id:require('node:crypto').randomUUID(),at:Date.now()};
     for (const key of ['thread','turn','project','section']) if (typeof input[key]==='string' && idPattern.test(input[key])) ctx[key]=input[key];
+    if(input.action==='create-subsection' && !ctx.project)throw Error('Choose a local project.');
     for (const [key,limit] of [['reference',4096],['item',160]]) if (typeof input[key]==='string') ctx[key]=input[key].slice(0,limit);
     if(input.action==='new-bookmark'){
       if(typeof input.anchor!=='string'||input.anchor.length>2048)throw Error('Invalid bookmark selection.');
@@ -476,22 +477,30 @@
     return {enabled:true, account, apply:pending};
   });
   const clients=new Set();
-  ipcMain.on?.('local-sidebar:parents', event => {
-    const parents = {};
+  ipcMain.on?.('local-sidebar:groups', event => {
+    const parents = {}, projectKeys = {};
     if (primaryFrame(event)) try {
       const data = JSON.parse(require('node:fs').readFileSync(path.join(home,'.codex-global-state.json'),'utf8'));
       const account = colourAccount();
       const scoped = data['codex-mods-sidebar-groups-v1']?.[account]?.parents || {};
       const sections = new Set((data['electron-persisted-atom-state']?.['sidebar-custom-sections-v3']?.[account]?.sections || []).map(row => row.id));
       const aliases = data['app-server-project-id-by-legacy-project-id-by-host']?.['local:'+home] || {};
+      const rowIds = new Map();
+      for (const [key, project] of Object.entries(data['local-projects'] || {})) {
+        const backing = project.chatGptBacking;
+        if (!idPattern.test(key) || (backing && (!account || backing.accountId !== account))) continue;
+        const ids = [key, aliases[key], backing?.projectId].filter(id => typeof id === 'string' && id);
+        rowIds.set(key, ids);
+        for (const id of ids) projectKeys[id] = key;
+      }
       for (const [section, parent] of Object.entries(scoped)) {
         if (!idPattern.test(section) || typeof parent !== 'string') continue;
         if (parent.startsWith('custom:') && sections.has(parent.slice(7)) && parent.slice(7) !== section)
           parents[section] = {section: parent.slice(7)};
-        else if (idPattern.test(parent)) parents[section] = [parent, aliases[parent]].filter(Boolean);
+        else if (rowIds.has(parent)) parents[section] = rowIds.get(parent);
       }
     } catch { /* A fresh profile has no nested sections. */ }
-    event.returnValue = parents;
+    event.returnValue = {parents,projectKeys};
   });
   let watcher;
   async function dispatchCommand(){
