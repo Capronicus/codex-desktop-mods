@@ -47,6 +47,7 @@ def main():
     sub.add_parser("sidebar").add_argument("mode", choices=("on", "off"))
     sub.add_parser("colours").add_argument("mode", choices=("on", "off"))
     sub.add_parser("order").add_argument("mode", choices=("on", "off"))
+    sub.add_parser("reading").add_argument("mode", choices=("on", "off"))
     sub.add_parser("marks").add_argument("mode", choices=("on", "off"))
     sub.add_parser("archive").add_argument("mode", choices=("on", "off"))
     sub.add_parser("encryption").add_argument("mode", choices=("on", "off"))
@@ -76,7 +77,7 @@ def main():
     try:
         if args.command == "setup":
             result = sync.setup(args.folder, args.automatic)
-        elif args.command in ("sidebar", "colours", "order", "settings", "marks", "archive"):
+        elif args.command in ("sidebar", "colours", "order", "settings", "marks", "reading", "archive"):
             result = sync.set_exchange_option(args.command, args.mode == "on")
         elif args.command == "encryption":
             result = sync.set_encryption(args.mode == "on")

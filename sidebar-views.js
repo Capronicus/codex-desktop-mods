@@ -4,14 +4,18 @@ function installMarksSync(api) {
   const viewPrefix = 'codex.mods.saved-view.v1/', wordPrefix = 'codex.mods.animated-words.v1/';
   let account = null, applied = null, busy = false, timer = 0;
   function snapshot() {
-    const scope = viewPrefix + account + '/', views = {}, words = [];
+    const scope = viewPrefix + account + '/', views = {}, words = [], wordStyles={};
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key.startsWith(scope)) {
         try { views[key.slice(scope.length)] = JSON.parse(localStorage.getItem(key)); } catch { /* Not a saved view. */ }
-      } else if (key.startsWith(wordPrefix)) words.push(key.slice(wordPrefix.length));
+      } else if (key.startsWith(wordPrefix)){
+        const tag=key.slice(wordPrefix.length),effect=localStorage.getItem(key);
+        words.push(tag);
+        if(['gold','rainbow'].includes(effect))wordStyles[tag]=effect;
+      }
     }
-    return {account, views, words};
+    return {account, views, words, wordStyles};
   }
   function schedule(delay) { if (!timer) timer = setTimeout(exchange, delay); }
   async function exchange() {
@@ -28,7 +32,7 @@ function installMarksSync(api) {
         const target = key => key.startsWith('view/') ? viewPrefix + account + '/' + key.slice(5)
           : key.startsWith('word/') ? wordPrefix + key.slice(5) : null;
         for (const [key,value] of Object.entries(received.set || {}))
-          if (target(key)) localStorage.setItem(target(key), key.startsWith('view/') ? JSON.stringify(value) : '1');
+          if (target(key)) localStorage.setItem(target(key), key.startsWith('view/') ? JSON.stringify(value) : (['rainbow','gold'].includes(value)?value:'1'));
         for (const key of received.remove || []) if (target(key)) localStorage.removeItem(target(key));
         applied = received.id;
         // Storage events only reach other windows. Tell this window's list and highlights too.

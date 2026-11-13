@@ -1,6 +1,9 @@
 """Exchange receipts for verified history revisions. Device labels are user-editable."""
 
+import os
+from pathlib import Path
 import platform
+import time
 import re
 import sync
 
@@ -53,6 +56,23 @@ def set_name(name, emoji=None):
     return {"device_name": name, "device_emoji": cfg.get("device_emoji", "")}
 
 
+def build_label(value):
+    if isinstance(value, dict) and type(value.get("version")) is str and type(value.get("build")) is str and re.fullmatch(r"[0-9a-f]{12}", str(value.get("build", ""))) and re.fullmatch(r"\d+\.\d+\.\d+", str(value.get("version", ""))):
+        return value["version"] + " · " + value["build"]
+    return None
+
+
+def local_build():
+    if os.name == "nt":
+        root = Path(os.environ.get("LOCALAPPDATA", "")) / "OpenAI/Capronicus/CodexDesktopMods"
+    else:
+        root = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "codex-sidebar-colours"
+    running = sync.read_json(sync.STATE / "running-build.json", {})
+    recent = isinstance(running, dict) and type(running.get("at")) is int and 0 <= time.time() - running["at"]/1000 <= 100
+    return {"running": build_label(running) if recent else None,
+            "ready": build_label(sync.read_json(root / "build-ready.json", {}))}
+
+
 def exchange(vault, cfg, heads, accepted, busy, stats, state, private, visible, origins):
     directory = vault / "receipts-v1"
     dev = cfg["device"]
@@ -76,6 +96,17 @@ def exchange(vault, cfg, heads, accepted, busy, stats, state, private, visible, 
         "busy": waiting,
         "origins": {tid: basis for tid, basis in origins.items() if tid not in private},
     }
+    import bookmarks
+    account = sync.digest(bookmarks.account_id().encode())
+    if cfg.get("reading"):
+        cursors = sync.read_json(sync.STATE / ("reading-"+dev+"-"+account+".json"), {})
+        own["reading"] = {tid: row for tid,row in cursors.items() if tid in visible and tid not in private and tid in heads}
+        own["readingAccount"] = account
+    own["build"] = local_build()
+    # Refresh the last-seen time periodically without churning cloud files each minute.
+    previous = old.get("seen", 0)
+    now = int(time.time())
+    own["seen"] = previous if type(previous) is int and 0 <= now-previous < 300 and old.get("build")==own["build"] else now
     save(path, own)
     peers = {}
     for f in directory.glob("*.json"):
@@ -132,7 +163,17 @@ def exchange(vault, cfg, heads, accepted, busy, stats, state, private, visible, 
             if len(candidates) == 1 and candidates[0]["basis"] != "preexisting"
             else None
         )
+        cursors = []
+        if cfg.get("reading") and tid in visible:
+            for device, peer in peers.items():
+                if peer.get("readingAccount") != account or not isinstance(peer.get("reading"), dict): continue
+                row = peer["reading"].get(tid)
+                if not isinstance(row,dict) or not isinstance(row.get("turn"),str) or not sync.UUID.fullmatch(row["turn"]): continue
+                if type(row.get("at")) is not int or not 0 < row["at"] < 2**53: continue
+                cursors.append({"device":device,"name":peer["name"][:60],"turn":row["turn"],"at":row["at"],
+                                "role":"user" if row.get("role")=="user" else "assistant","item":str(row.get("item",""))[:160]})
         result[tid] = {
+            "reading": sorted(cursors,key=lambda r:-r["at"]),
             "status": status,
             "received_by": delivered,
             "waiting_on": blocked,
@@ -140,7 +181,8 @@ def exchange(vault, cfg, heads, accepted, busy, stats, state, private, visible, 
         }
     for tid in private:
         result[tid] = {"status": "local_only", "received_by": [], "waiting_on": []}
-    save(sync.STATE / "delivery.json", {"device": dev, "peers": {device: row["name"][:60] for device, row in peers.items()}, "chats": result})
+    save(sync.STATE / "delivery.json", {"device": dev, "peers": {device: row["name"][:60] for device, row in peers.items()}, "chats": result,
+        "builds": [{"name": p["name"][:60], "build": p.get("build"), "seen": p.get("seen")} for p in peers.values()]})
 
 
 def status(thread):

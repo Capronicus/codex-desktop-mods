@@ -55,9 +55,10 @@ def status():
     return {
         "configured": bool(device), "device": delivery.label(cfg) if device else None,
         "deviceEmoji": cfg.get("device_emoji", ""),
+        "build": delivery.local_build(), "peerBuilds": receipts.get("builds", []) if device and receipts.get("device")==device else [],
         "folder": folder, "available": bool(folder and (Path(folder) / "codex-chat-sync-v1").is_dir()),
         "paused": bool(cfg.get("paused")), "automatic": bool(cfg.get("automatic")),
-        "options": {k: bool(cfg.get(k)) for k in ("colours", "settings", "sidebar", "order", "tree", "marks", "archive", "encrypted")},
+        "options": {k: bool(cfg.get(k)) for k in ("colours", "settings", "sidebar", "order", "tree", "marks", "reading", "archive", "encrypted")},
         "health": health, "receipts": counts, "peers": list(peers.values()),
         "integrity": sync.last_folder_check(cfg),
         "sidebarReview": {

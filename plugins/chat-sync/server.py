@@ -129,6 +129,7 @@ TOOLS = [
          {"enabled": {"type": "boolean"}}),
     tool("set_archive_sync", "Enable or disable archiving and restoring chats here when another desktop archives or restores them.",
          {"enabled": {"type": "boolean"}}),
+    tool("set_reading_sync", "Share per-device reading positions for synced local chats.", {"enabled":{"type":"boolean"}}),
     tool("set_marks_sync", "Enable or disable exchanging this account's bookmarks, saved views and text animations through the configured private folder.",
          {"enabled": {"type": "boolean"}}),
     tool(
@@ -210,6 +211,7 @@ ACTIONS = {
     "set_pin_order_sync": lambda enabled: sync.set_exchange_option("order", enabled),
     "chat_sync_status": sync.status,
     "set_settings_sync": lambda enabled: sync.set_exchange_option("settings", enabled),
+    "set_reading_sync": lambda enabled: sync.set_exchange_option("reading", enabled),
     "set_marks_sync": lambda enabled: sync.set_exchange_option("marks", enabled),
     "set_archive_sync": lambda enabled: sync.set_exchange_option("archive", enabled),
     "set_folder_encryption": sync.set_encryption,
@@ -241,9 +243,10 @@ for name, fn, required, optional, readonly in (
     ("compare_handoff_file", chat_actions.compare_handoff_file, ("sender","request"), (), True),
     ("read_handoff_reply", chat_actions.reply, ("thread","turn"), ("item",), True),
     ("dismiss_reply_handoff", chat_actions.dismiss, ("sender","request"), (), False),
+    ("chat_outline", chat_actions.outline, ("thread",), (), True),
     ("list_chat_family", chat_actions.family, ("thread",), (), True),
     ("compare_chat_histories", chat_actions.conflict, ("thread","left","right"), (), True),
-    ("desktop_chat_command", chat_actions.desktop_command, ("action",), ("thread","turn","item"), False),
+    ("desktop_chat_command", chat_actions.desktop_command, ("action",), ("thread","turn","item","role"), False),
 ):
     TOOLS.append({**tool(name, name.replace("_"," ").capitalize(), {k: {"type":"string"} for k in (*required,*optional)},
                          readonly=readonly, optional=optional), "_meta":{"ui":{"visibility":["app"]}}})
@@ -272,7 +275,7 @@ def handle(req):
         version = params.get("protocolVersion")
         return {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[0],
-            "serverInfo": {"name": "chat-sync", "version": "0.15.1"},
+            "serverInfo": {"name": "chat-sync", "version": "0.16.0"},
             "capabilities": {"tools": {}, "resources": {}},
         }
     if method == "ping":

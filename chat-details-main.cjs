@@ -430,12 +430,17 @@
     } finally { await fs.unlink(tmp).catch(()=>{}); }
   }
   ipcMain.handle('local-chat-actions:context', async (event, input) => {
-    if (!primaryFrame(event) || !input || !['handoff','inbox','file','family','project','organize','create-subsection','conflicts','performance','bookmarks','new-bookmark'].includes(input.action))
+    if (!primaryFrame(event) || !input || !['handoff','inbox','file','family','project','organize','create-subsection','move-chats','outline','conflicts','performance','bookmarks','new-bookmark'].includes(input.action))
       throw new Error('Unavailable desktop action.');
     const ctx = {action:input.action,id:require('node:crypto').randomUUID(),at:Date.now()};
     for (const key of ['thread','turn','project','section']) if (typeof input[key]==='string' && idPattern.test(input[key])) ctx[key]=input[key];
     if(input.action==='create-subsection' && !ctx.project)throw Error('Choose a local project.');
     for (const [key,limit] of [['reference',4096],['item',160]]) if (typeof input[key]==='string') ctx[key]=input[key].slice(0,limit);
+    if(input.action==='move-chats'){
+      if(!Array.isArray(input.chats)||!input.chats.length||input.chats.length>500||
+          !input.chats.every(id=>typeof id==='string'&&idPattern.test(id)))throw Error('Choose local chats.');
+      ctx.chats=[...new Set(input.chats)];ctx.account=colourAccount();
+    }
     if(input.action==='new-bookmark'){
       if(typeof input.anchor!=='string'||input.anchor.length>2048)throw Error('Invalid bookmark selection.');
       const [key,start,end,hash]=JSON.parse(input.anchor), address=JSON.parse(key);
@@ -472,10 +477,22 @@
       for (const [id,view] of Object.entries(payload.views).slice(0,500))
         if (idPattern.test(id) && view && typeof view === 'object' && JSON.stringify(view).length <= 2048) views[id] = view;
       const words = payload.words.filter(tag => typeof tag === 'string' && tag.length <= 2048).slice(0,5000);
-      await saveAction('renderer-marks.json', {account, views, words, at:Date.now()});
+      const wordStyles=Object.fromEntries(words.filter(tag=>['rainbow','gold'].includes(payload.wordStyles?.[tag])).map(tag=>[tag,payload.wordStyles[tag]]));
+      await saveAction('renderer-marks.json', {account, views, words, wordStyles, at:Date.now()});
     }
     return {enabled:true, account, apply:pending};
   });
+  let buildHeartbeat;
+  function reportRunningBuild() {
+    if (!process.resourcesPath || buildHeartbeat) return;
+    let build;
+    try { build = JSON.parse(require('node:fs').readFileSync(path.join(process.resourcesPath,'codex-mod-build.json'),'utf8')); }
+    catch { return; }
+    const report = () => saveAction('running-build.json',{...build,at:Date.now()}).catch(()=>{});
+    report();
+    buildHeartbeat = setInterval(report,45000);
+    buildHeartbeat.unref();
+  }
   const clients=new Set();
   ipcMain.on?.('local-sidebar:groups', event => {
     const parents = {}, projectKeys = {};
@@ -500,7 +517,8 @@
         else if (rowIds.has(parent)) parents[section] = rowIds.get(parent);
       }
     } catch { /* A fresh profile has no nested sections. */ }
-    event.returnValue = {parents,projectKeys};
+    event.returnValue = {parents,projectKeys,effectsAccount:primaryFrame(event)?
+      require('node:crypto').createHash('sha256').update(colourAccount()).digest('hex'):null};
   });
   let watcher;
   async function dispatchCommand(){
@@ -525,6 +543,7 @@
   }
   ipcMain.on?.('local-chat-actions:listen',async event=>{
     if(!primaryFrame(event))return;
+    reportRunningBuild();
     const contents=event.sender;
     if(!clients.has(contents)){
       clients.add(contents);
@@ -542,6 +561,24 @@
     } catch { /* Other desktop features work without the local panel. */ }
   });
 
+  let readingWrites=Promise.resolve();
+  ipcMain.handle('local-chat-actions:reading',(event,cursor)=>{
+    if(!primaryFrame(event) || !cursor || !idPattern.test(cursor.thread) || !idPattern.test(cursor.turn) ||
+       !['user','assistant'].includes(cursor.role) || typeof cursor.item!=='string' || cursor.item.length>160)return;
+    readingWrites=readingWrites.catch(()=>{}).then(async()=>{
+      const cfg=JSON.parse(await fs.readFile(path.join(actionDir,'config.json'),'utf8'));
+      if(!cfg.reading || cfg.paused || !idPattern.test(cfg.device) || cfg.private_chats?.includes(cursor.thread))return;
+      const account=require('node:crypto').createHash('sha256').update(colourAccount()).digest('hex');
+      const name='reading-'+cfg.device+'-'+account+'.json';
+      let rows={};
+      try{rows=JSON.parse(await fs.readFile(path.join(actionDir,name),'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
+      const {thread,turn,item,role}=cursor, previous=rows[thread];
+      if(previous?.turn===turn && previous.item===item && previous.role===role)return;
+      rows[thread]={turn,item,role,at:Date.now()};
+      await saveAction(name,rows);
+    });
+    return readingWrites;
+  });
   let receiptCache;
   ipcMain.handle('local-chat-sync:delivery', async (event,ids) => {
     const frame=event.senderFrame;
@@ -555,7 +592,8 @@
         receiptCache={mtime:stamp.mtimeMs,ino:stamp.ino,doc:JSON.parse(await fs.readFile(file,'utf8'))};
       if (receiptCache.doc.device!==config.device) return {};
       return Object.fromEntries(ids.filter(id=>receiptCache.doc.chats[id]).map(id=>
-        [id,config.private_chats?.includes(id)?{status:'local_only'}:receiptCache.doc.chats[id]]));
+        [id,config.private_chats?.includes(id)?{status:'local_only'}:{...receiptCache.doc.chats[id],
+          readingEnabled:!!config.reading && !config.paused,reading:config.reading?receiptCache.doc.chats[id].reading:[]}]));
     } catch { return {}; }
   });
 

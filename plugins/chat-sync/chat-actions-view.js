@@ -29,16 +29,24 @@ async function loadActions() {
     const ctx=data.context;
     if(ctx.id && ctx.id!==activeRequest){
       activeRequest=ctx.id;
-      if(['organize','create-subsection'].includes(ctx.action)){
+      el('quick-move').hidden=ctx.action!=='move-chats';
+      if(ctx.action==='move-chats'){
+        groupData=await call('sidebar_group_inventory');
+        el('move-query').value='';
+        el('move-count').textContent=ctx.chats.length+(ctx.chats.length===1?' chat selected':' chats selected');
+        el('move-feedback').textContent=groupData.pending?'A sidebar change is already queued.':'';
+        filterMoveTargets();el('move-query').focus();el('quick-move').scrollIntoView({block:'start'});
+      }else if(['organize','create-subsection'].includes(ctx.action)){
         el('group-editor').open=true;
         await loadGroups(ctx);
         el('group-editor').scrollIntoView({block:'start'});
         if(ctx.action==='create-subsection' && el('group-parent').value)el('group-name').focus();
       }else el('chat-actions').open=true;
-      const section=({bookmarks:'bookmarks','new-bookmark':'bookmarks',handoff:'send-handoff',file:'file-copy',family:'branches',project:'exclude-project',inbox:'handoff-inbox',performance:'performance',conflicts:'conflict-preview'})[ctx.action];
+      const section=({outline:'outline',bookmarks:'bookmarks','new-bookmark':'bookmarks',handoff:'send-handoff',file:'file-copy',family:'branches',project:'exclude-project',inbox:'handoff-inbox',performance:'performance',conflicts:'conflict-preview'})[ctx.action];
       if(section)el(section).open=true;
       el('bookmark-new').hidden=ctx.action!=='new-bookmark';
       el('bookmark-name').value=ctx.label||'';
+      if(section==='outline')await loadOutline(ctx.thread);
       if(section==='bookmarks')await loadBookmarks();
       el('file-reference').value=ctx.reference||'';
       el('handoff-file').value=ctx.action==='handoff'?ctx.reference||'':'';el('handoff-note').value='';el('action-content').replaceChildren();reportAction('');
@@ -64,6 +72,10 @@ async function loadActions() {
         const args={sender:msg.sender,request:msg.id}, result=await call('compare_handoff_file',args);
         const block=el('action-content');
         block.replaceChildren(actionText('h3',result.status),actionText('p',result.reference));
+        for(const [label,git] of [[msg.name,result.senderGit],['This PC',result.localGit]]){
+          if(typeof git?.branch==='string')block.append(actionText('p',label+' · '+git.branch+
+            (git.commit?' · '+git.commit:'')+(git.fileDirty?' · uncommitted changes to this file':git.dirty?' · other uncommitted changes':'')));
+        }
         if(result.status!=='Missing here')block.append(actionButton('Open local copy',()=>showFile({thread:msg.thread,reference:result.reference})));
       }));
       list.append(row);
@@ -114,7 +126,7 @@ async function changeRule(kind,ident,enabled,shared=false) {
   await loadActions();reportAction(enabled?'Excluded on this desktop. Copies already shared are retained.':'Exclusion removed on this desktop.');
 }
 async function command(action, ctx={}) {
-  await call('desktop_chat_command',{action,thread:ctx.thread||'',turn:ctx.turn||'',item:ctx.item||''});
+  await call('desktop_chat_command',{action,thread:ctx.thread||'',turn:ctx.turn||'',item:ctx.item||'',role:ctx.role||''});
   reportAction(action==='measure'?'Switch to a chat and scroll for 12 seconds. Refresh here for the result.':'Opening the chat in Desktop Mods.');
 }
 function bindAction(id, run){
@@ -174,6 +186,25 @@ function groupPath(key) {
 function groupLabel(key) {
   return groupPath(key).map(id => id.startsWith('custom:') ? groupData.sections[id.slice(7)] : groupData.projects[id]).join(' › ');
 }
+function filterMoveTargets(){
+  if(!groupData)return;
+  const q=el('move-query').value.trim().toLocaleLowerCase();
+  const groups=[...Object.keys(groupData.projects),...Object.keys(groupData.sections).map(id=>'custom:'+id)];
+  const options=groups.map(id=>[id,groupLabel(id)]).filter(([,name])=>name.toLocaleLowerCase().includes(q));
+  selectValues(el('move-target'),options);
+  if(options.length)el('move-target').selectedIndex=0;
+  el('move-preview').disabled=!options.length || !groupData.ready || !!groupData.pending;
+}
+el('move-query').oninput=filterMoveTargets;
+el('move-preview').onclick=async()=>{
+  try{
+    const parent=el('move-target').value, chats=dashboardState?.context?.chats;
+    if(!parent || !chats?.length)return;
+    await previewBatch([...batchSteps,{action:'assign',parent,chats}]);
+    el('quick-move').hidden=true;el('group-editor').open=true;
+    el('batch-review').scrollIntoView({block:'center'});el('batch-apply').focus();
+  }catch(error){el('move-feedback').textContent=error.message;}
+};
 function renderGroupAction() {
   if (!groupData) return;
   const mode=el('group-action').value, source=el('group-source'), parent=el('group-parent');
@@ -274,6 +305,23 @@ bindAction('batch-apply',async()=>{
   }catch(e){el('group-feedback').textContent=e.message;}
 });
 
+let outlineRows=[];
+function renderOutline(){
+  const list=el('outline-list'), q=el('outline-filter').value.trim().toLowerCase();
+  list.replaceChildren();
+  for(const row of outlineRows.filter(row=>(row.kind+' '+row.label).toLowerCase().includes(q))){
+    const li=document.createElement('li');
+    li.append(actionButton(row.kind+' · '+row.label,()=>row.bookmark?
+      call('edit_message_bookmark',{action:'open',ident:row.bookmark,label:''}):command('navigate',row)));
+    list.append(li);
+  }
+  if(!list.childElementCount)list.append(actionText('li','No matching entries.'));
+}
+async function loadOutline(thread){
+  outlineRows=[];el('outline-filter').value='';renderOutline();
+  if(thread){outlineRows=await call('chat_outline',{thread});renderOutline();el('outline-filter').focus();el('outline').scrollIntoView({block:'start'});}
+}
+el('outline-filter').oninput=renderOutline;
 async function loadBookmarks(){
   try{
     const list=el('bookmark-list'), rows=await call('list_message_bookmarks');

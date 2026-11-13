@@ -6,6 +6,7 @@
     visuals: ipcRenderer.sendSync('local-mod-controls:visuals'),
     subsectionParents: groups.parents,
     sidebarProjectKeys: groups.projectKeys,
+    effectsAccount: groups.effectsAccount,
     openModControls: async context => {
       if (context) await ipcRenderer.invoke('local-chat-actions:context', context);
       return ipcRenderer.invoke('codex_desktop:message-from-view', {
@@ -22,6 +23,7 @@
       window.addEventListener('focus', attach);
       attach();
     },
+    saveReading: cursor => ipcRenderer.invoke('local-chat-actions:reading',cursor),
     savePerformance: report => ipcRenderer.invoke('local-chat-actions:performance', report),
     savedViewData: () => ipcRenderer.invoke('local-sidebar:saved-view-data'),
     marks: payload => ipcRenderer.invoke('local-marks:exchange', payload),

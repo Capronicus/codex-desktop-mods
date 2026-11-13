@@ -56,7 +56,19 @@ With **Codex Desktop Mods** and **Codex Chat Sync 0.15.1** installed, right-clic
 
 Click **Save change**, fully quit the desktop (including its tray window), and reopen it. The conversion uses Codex's project and chat APIs. Parent placement and remembered folder paths are specific to this desktop.
 
+## Home and Work in 0.16.0
+
+- **Mod Controls → Desktop builds** shows the running and staged mod fingerprints. On connected PCs, it shows what each device last reported. The same desktop patch has the same fingerprint on Windows and Linux. An older or closed app may show *unreported*.
+- Select one or more local chats in the sidebar, right-click **Move to…**, and search for a project or subsection by name. Pick the full path, preview the move, then **Apply batch on quit**. Fully quit and reopen to apply it.
+- Enable **Reading positions across devices** on both PCs. After you scroll in a synced local chat and both PCs sync, **Resume from Work** above the composer jumps to the turn you were reading. Each device keeps its own position. Only the chat and message identifiers, role and time travel.
+- **Chat outline** above the composer (also on the message menu) lists prompts, bookmarks, and replies containing recognizable file references. It reads the local transcript on demand. Type to filter, then choose an entry to jump there.
+- When handing off a project file in a Git checkout, **Compare** shows the sender’s branch, commit and any uncommitted changes alongside the receiving checkout. The branch and commit travel with the handoff. File contents stay on each PC.
+
 ## Animated words in chat
+
+Select any phrase in your own message or an assistant reply. Right-click for **Gold shimmer**, **Fabulous rainbow** or the original pulse. Open **Text effect rules…** from a message to save or remove an exact, case-sensitive phrase rule for this account on this desktop. Manual selections take precedence over inline markup, then phrase rules.
+
+Either author can write `[your phrase](#fx-gold)`, `[your phrase](#fx-rainbow)` or `[your phrase](#fx-pulse)`. Markdown-rendered links show their label. Plain-text messages also accept `[[rainbow|your phrase]]` and keep the typed delimiters visible. Inline code and code blocks stay literal. Reduced motion keeps the colours still.
 
 Select words in a chat message, right-click the selection, and choose **Animate selected text**. The selected occurrence gets a gently pulsing highlight. Select any part of it and choose **Remove text animation** to clear it. This works in local Codex and ChatGPT messages, including your own. The marks are saved on this desktop and leave the message and copied text intact. With reduced motion enabled, the highlight stays still.
 
