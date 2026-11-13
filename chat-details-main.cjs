@@ -453,6 +453,28 @@
     }
     await saveAction('desktop-performance.json',value);
   });
+  // Saved views and text animations live in the window's storage. With marks sync on,
+  // the window hands over a snapshot and receives what other desktops changed.
+  ipcMain.handle('local-marks:exchange', async (event, payload) => {
+    if (!primaryFrame(event)) throw Error('Unavailable sidebar.');
+    let cfg;
+    try { cfg = JSON.parse(await fs.readFile(path.join(actionDir,'config.json'),'utf8')); } catch { return {enabled:false}; }
+    if (!cfg?.marks) return {enabled:false};
+    const account = require('node:crypto').createHash('sha256').update(colourAccount()).digest('hex');
+    const instructions = path.join(actionDir,'renderer-marks-apply.json');
+    let pending = null;
+    try { pending = JSON.parse(await fs.readFile(instructions,'utf8')); } catch { /* Nothing was received. */ }
+    if (pending?.account !== account || typeof pending.id !== 'string') pending = null;
+    if (pending && payload?.applied === pending.id) { await fs.unlink(instructions).catch(()=>{}); pending = null; }
+    if (payload?.account === account && payload.views && typeof payload.views === 'object' && Array.isArray(payload.words)) {
+      const views = {};
+      for (const [id,view] of Object.entries(payload.views).slice(0,500))
+        if (idPattern.test(id) && view && typeof view === 'object' && JSON.stringify(view).length <= 2048) views[id] = view;
+      const words = payload.words.filter(tag => typeof tag === 'string' && tag.length <= 2048).slice(0,5000);
+      await saveAction('renderer-marks.json', {account, views, words, at:Date.now()});
+    }
+    return {enabled:true, account, apply:pending};
+  });
   const clients=new Set();
   ipcMain.on?.('local-sidebar:parents', event => {
     const parents = {};
@@ -481,7 +503,8 @@
     try {
       await fs.rename(command,claimed);
       const doc=JSON.parse(await fs.readFile(claimed,'utf8'));
-      if(Date.now()-doc.at>=0 && Date.now()-doc.at<60000 && (doc.action==='measure' || (doc.action==='bookmark' && doc.account===colourAccount() && idPattern.test(doc.thread) && typeof doc.anchor==='string' && doc.anchor.length<=2048) ||
+      if(Date.now()-doc.at>=0 && Date.now()-doc.at<60000 && (doc.action==='measure' ||
+          (doc.action==='handoffs' && Number.isSafeInteger(doc.count) && doc.count>0 && doc.count<1000) || (doc.action==='bookmark' && doc.account===colourAccount() && idPattern.test(doc.thread) && typeof doc.anchor==='string' && doc.anchor.length<=2048) ||
           (doc.action==='navigate' && idPattern.test(doc.thread) && (!doc.turn || idPattern.test(doc.turn)))))
         {
           if (doc.action === 'bookmark' && doc.cloud)

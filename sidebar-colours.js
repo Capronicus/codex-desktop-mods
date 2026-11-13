@@ -836,6 +836,8 @@ function installChatActions() {
   }
   api.listenActions(command=>{
     if(command.action==='measure')measure();
+    else if(command.action==='handoffs')notice((command.count===1?'A reply handoff arrived.':command.count+' reply handoffs arrived.')+
+      ' Right-click the pet and choose Reply handoffs.');
     else if(command.action==='navigate'||command.action==='bookmark')navigate(command).catch(e=>notice(e.message));
   });
 }

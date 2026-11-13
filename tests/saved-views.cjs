@@ -72,9 +72,24 @@ const {chromium} = require('/usr/lib/chatgpt/resources/cua_node/lib/node_modules
     await page.getByText('Saved views',{exact:true}).click();
     await page.getByLabel('Saved sidebar view').selectOption({label:'Work waiting on Home'});
     assert.equal(await page.locator('#csc-saved-views li').count(),1);
+    // The title filter narrows the chosen view, or every local chat without one.
+    const shown = ()=>page.locator('#csc-saved-views li').count();
+    await page.getByLabel('Filter chats by title').fill('zzz');
+    assert.equal(await shown(),0);
+    assert.equal(await page.locator('#csc-saved-views [role=status]').textContent(),'0 matching chats');
+    await page.getByLabel('Filter chats by title').fill('PEND');
+    assert.equal(await shown(),1);
+    await page.getByLabel('Saved sidebar view').selectOption('');
+    assert.equal(await page.getByLabel('Filter chats by title').inputValue(),'PEND');
+    assert.equal(await shown(),1);
+    await page.getByLabel('Filter chats by title').fill('o');
+    assert.equal(await shown(),4);
+    await page.getByLabel('Filter chats by title').fill('');
+    assert.equal(await shown(),0);
+    await page.getByLabel('Saved sidebar view').selectOption({label:'Work waiting on Home'});
     await write(path.join(dir,'auth.json'),{tokens:{account_id:'other'}});
     await page.getByRole('button',{name:'Refresh'}).click();
     await page.waitForFunction(()=>!document.querySelector('#csc-saved-views li') && document.querySelector('#csc-saved-views select')?.length===1);
-    console.log('Passed native catalogue, weekly project/origin/receipt filter, navigation, reload and account isolation.');
+    console.log('Passed native catalogue, weekly project/origin/receipt filter, title filter, navigation, reload and account isolation.');
   } finally {await browser.close();await fs.rm(dir,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

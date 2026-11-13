@@ -1,8 +1,57 @@
+// With marks sync on in Mod Controls, saved views and text animations follow this account
+// to other desktops. The main process decides whether anything leaves this window.
+function installMarksSync(api) {
+  const viewPrefix = 'codex.mods.saved-view.v1/', wordPrefix = 'codex.mods.animated-words.v1/';
+  let account = null, applied = null, busy = false, timer = 0;
+  function snapshot() {
+    const scope = viewPrefix + account + '/', views = {}, words = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key.startsWith(scope)) {
+        try { views[key.slice(scope.length)] = JSON.parse(localStorage.getItem(key)); } catch { /* Not a saved view. */ }
+      } else if (key.startsWith(wordPrefix)) words.push(key.slice(wordPrefix.length));
+    }
+    return {account, views, words};
+  }
+  function schedule(delay) { if (!timer) timer = setTimeout(exchange, delay); }
+  async function exchange() {
+    timer = 0;
+    if (busy || document.hidden) return;
+    busy = true;
+    try {
+      const reply = await api.marks({...(account ? snapshot() : {}), applied});
+      if (!reply?.enabled) return;
+      const changed = account !== reply.account;
+      account = reply.account;
+      const received = reply.apply;
+      if (received && received.id !== applied) {
+        const target = key => key.startsWith('view/') ? viewPrefix + account + '/' + key.slice(5)
+          : key.startsWith('word/') ? wordPrefix + key.slice(5) : null;
+        for (const [key,value] of Object.entries(received.set || {}))
+          if (target(key)) localStorage.setItem(target(key), key.startsWith('view/') ? JSON.stringify(value) : '1');
+        for (const key of received.remove || []) if (target(key)) localStorage.removeItem(target(key));
+        applied = received.id;
+        // Storage events only reach other windows. Tell this window's list and highlights too.
+        window.dispatchEvent(new StorageEvent('storage', {key:null}));
+      }
+      if (changed || received) schedule(1000);
+    } catch { /* Marks stay on this desktop until the next attempt. */ }
+    finally { busy = false; }
+  }
+  window.setInterval(() => schedule(0), 20000);
+  window.addEventListener('focus', () => schedule(0));
+  window.addEventListener('storage', event => {
+    if (!event.key || event.key.startsWith(viewPrefix) || event.key.startsWith(wordPrefix)) schedule(1500);
+  });
+  schedule(0);
+}
+
 // A view reads the local catalogue on demand. Opening a result uses the native chat route.
 function installSidebarViews() {
   const api = window.localChatDetails;
   if (!api?.savedViewData || window.cscSidebarViews) return;
   window.cscSidebarViews = true;
+  if (api.marks) installMarksSync(api);
   const panel = document.createElement('details');
   panel.id = 'csc-saved-views';
   const summary = document.createElement('summary');
@@ -20,10 +69,16 @@ function installSidebarViews() {
     #csc-saved-views button:hover,#csc-saved-views button:focus-visible {background:color-mix(in srgb,currentColor 14%,transparent)}
     #csc-saved-views ol {list-style:none;margin:4px 0;padding:0;max-height:38vh;overflow:auto}
     #csc-saved-views li button {display:block;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    #csc-saved-views input[type=search] {display:block;width:100%;box-sizing:border-box;margin:4px 0}
   `;
   document.head.append(style);
   let data, active = '', request = 0, editing = false, host, queued = false;
   const prefix = 'codex.mods.saved-view.v1/';
+  // The title filter narrows the chosen view, or every local chat when no view is chosen.
+  const filter = document.createElement('input');
+  filter.type = 'search';
+  filter.placeholder = 'Filter chats by title';
+  filter.setAttribute('aria-label','Filter chats by title');
   function records() {
     const scope = prefix + data.account + '/';
     return Object.keys(localStorage).filter(k=>k.startsWith(scope)).flatMap(key=>{
@@ -79,6 +134,7 @@ function installSidebarViews() {
   }
   function render() {
     editing = false;
+    const typing = document.activeElement === filter;
     body.replaceChildren();
     const views = records();
     const view = views.find(row=>row.key===active);
@@ -87,41 +143,52 @@ function installSidebarViews() {
     chooser.onchange = ()=>{active=chooser.value;render();};
     body.append(chooser);
     control('New view',()=>editor());
-    if (!view) return;
-    control('Edit',()=>editor(view));
-    control('Remove',()=>{
-      if (window.confirm('Remove “'+view.name+'” from saved views?')) {
-        localStorage.removeItem(view.key);
-        active = '';
-        render();
-      }
-    });
+    if (view) {
+      control('Edit',()=>editor(view));
+      control('Remove',()=>{
+        if (window.confirm('Remove “'+view.name+'” from saved views?')) {
+          localStorage.removeItem(view.key);
+          active = '';
+          render();
+        }
+      });
+    }
     control('Refresh',refresh);
-    const cutoff = Date.now() - Number(view.age)*86400000;
-    const rows = data.chats.filter(row=>
-      (!view.project || row.project===view.project) &&
-      (!view.origin || row.origin===view.origin) &&
-      (!view.age || row.updated>=cutoff) &&
-      (!view.waiting || (view.waiting!==data.device && Object.hasOwn(data.devices,view.waiting) &&
-        (row.busy.includes(view.waiting) || (row.shared && !row.received.includes(view.waiting))))));
-    rows.sort((a,b)=>b.updated-a.updated || a.title.localeCompare(b.title));
     const count = document.createElement('div');
     count.setAttribute('role','status');
-    count.textContent = rows.length+' matching '+(rows.length===1?'chat':'chats');
     const list = document.createElement('ol');
-    body.append(count,list);
-    let shown = 0;
-    function more() {
-      for (const row of rows.slice(shown,shown+50)) {
-        const item = document.createElement('li');
-        const link = control(row.title,()=>api.openChat(row.id),item);
-        link.title = row.title;
-        list.append(item);
-      }
-      shown += 50;
-      if (shown < rows.length) control('Show more',event=>{event.target.remove();more();});
+    body.append(filter,count,list);
+    if (typing) filter.focus();
+    let more;
+    function show() {
+      more?.remove();
+      list.replaceChildren();
+      const needle = filter.value.trim().toLocaleLowerCase();
+      if (!view && !needle) {count.textContent = ''; return;}
+      const cutoff = Date.now() - Number(view?.age)*86400000;
+      const rows = data.chats.filter(row=>
+        (!needle || row.title.toLocaleLowerCase().includes(needle)) && (!view || (
+        (!view.project || row.project===view.project) &&
+        (!view.origin || row.origin===view.origin) &&
+        (!view.age || row.updated>=cutoff) &&
+        (!view.waiting || (view.waiting!==data.device && Object.hasOwn(data.devices,view.waiting) &&
+          (row.busy.includes(view.waiting) || (row.shared && !row.received.includes(view.waiting))))))));
+      rows.sort((a,b)=>b.updated-a.updated || a.title.localeCompare(b.title));
+      count.textContent = rows.length+' matching '+(rows.length===1?'chat':'chats');
+      let shown = 0;
+      (function page() {
+        for (const row of rows.slice(shown,shown+50)) {
+          const item = document.createElement('li');
+          const link = control(row.title,()=>api.openChat(row.id),item);
+          link.title = row.title;
+          list.append(item);
+        }
+        shown += 50;
+        more = shown < rows.length ? control('Show more',()=>{more.remove();page();}) : null;
+      })();
     }
-    more();
+    filter.oninput = show;
+    show();
   }
   async function refresh() {
     const generation = ++request;
@@ -143,7 +210,7 @@ function installSidebarViews() {
   };
   window.addEventListener('focus',()=>{if (panel.open && !editing) refresh();});
   window.addEventListener('storage',event=>{
-    if (panel.open && !editing && data && event.key?.startsWith(prefix+data.account+'/')) render();
+    if (panel.open && !editing && data && (!event.key || event.key.startsWith(prefix+data.account+'/'))) render();
   });
   function mount() {
     queued = false;

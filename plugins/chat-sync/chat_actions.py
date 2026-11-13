@@ -273,6 +273,29 @@ def inbox():
     return sorted(result, key=lambda r: -r["created"])
 
 
+def announce(cfg, vault, private=()):
+    """Tell the open desktop once about handoffs that arrived since the last pass."""
+    record = sync.STATE / ("handoffs-seen-" + cfg["device"] + ".json")
+    known = sync.read_json(record)
+    done = sync.read_json(sync.STATE / ("handoffs-done-" + cfg["device"] + ".json"), {})
+    current = []
+    for f in (vault / "handoffs-v1" / cfg["device"]).glob("*/*.json"):
+        key = f.parent.name + "/" + f.stem
+        if key in done or not all(projects.valid_id(i) for i in (f.parent.name, f.stem)):
+            continue
+        thread = projects.peer_file(f).get("thread")
+        if projects.valid_id(thread) and thread not in private:
+            current.append(key)
+    # The first pass only records what is already waiting in the inbox.
+    fresh = [] if known is None else [key for key in current if key not in known]
+    if known is None or sorted(current) != sorted(known):
+        sync.atomic(record, sync.encode(sorted(current)))
+    if fresh:
+        sync.atomic(sync.STATE / "desktop-command.json", sync.encode(
+            {"action": "handoffs", "count": len(fresh), "id": str(uuid.uuid4()), "at": int(time.time()*1000)}))
+    return len(fresh)
+
+
 def compare_handoff_file(sender, request):
     checked_id(sender)
     checked_id(request)

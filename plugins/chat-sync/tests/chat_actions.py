@@ -91,6 +91,11 @@ class ChatActions(unittest.TestCase):
 
     def test_handoff(self):
         nonce=ident()
+        with self.on(self.home) as h:
+            cfg,vault=projects.config()
+            command=h/"chat-sync"/"desktop-command.json"
+            # The first pass records the inbox. Nothing has arrived yet.
+            self.assertEqual((actions.announce(cfg,vault),command.exists()),(0,False))
         with self.on(self.work):
             for _ in range(2):
                 actions.handoff(self.thread,self.turn,self.home,nonce,"Test this","assistant-reply")
@@ -99,6 +104,13 @@ class ChatActions(unittest.TestCase):
             projects.set_private("chat",self.thread,True)
             with self.assertRaises(ValueError):actions.handoff(self.thread,self.turn,self.home,ident())
         with self.on(self.home):
+            self.assertEqual(actions.announce(cfg,vault),1)
+            notice=sync.read_json(command)
+            self.assertEqual((notice["action"],notice["count"]),("handoffs",1))
+            command.unlink()
+            # One notice per arrival, and none for a chat kept on this desktop.
+            self.assertEqual((actions.announce(cfg,vault),command.exists()),(0,False))
+            self.assertEqual(actions.announce(cfg,vault,{self.thread}),0)
             msg,=actions.inbox()
             self.assertEqual(msg["note"],"Test this")
             self.assertEqual(actions.reply(msg["thread"],msg["turn"],msg["item"])["text"],"Shared answer")

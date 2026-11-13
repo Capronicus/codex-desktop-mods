@@ -57,7 +57,7 @@ def status():
         "deviceEmoji": cfg.get("device_emoji", ""),
         "folder": folder, "available": bool(folder and (Path(folder) / "codex-chat-sync-v1").is_dir()),
         "paused": bool(cfg.get("paused")), "automatic": bool(cfg.get("automatic")),
-        "options": {k: bool(cfg.get(k)) for k in ("colours", "settings", "sidebar", "order", "tree")},
+        "options": {k: bool(cfg.get(k)) for k in ("colours", "settings", "sidebar", "order", "tree", "marks")},
         "health": health, "receipts": counts, "peers": list(peers.values()),
         "integrity": sync.last_folder_check(cfg),
         "sidebarReview": {

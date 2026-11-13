@@ -47,6 +47,7 @@ def main():
     sub.add_parser("sidebar").add_argument("mode", choices=("on", "off"))
     sub.add_parser("colours").add_argument("mode", choices=("on", "off"))
     sub.add_parser("order").add_argument("mode", choices=("on", "off"))
+    sub.add_parser("marks").add_argument("mode", choices=("on", "off"))
     for command, fields in {
         "projects": [],
         "link": ["local_project", "shared_project", "folder"],
@@ -73,7 +74,7 @@ def main():
     try:
         if args.command == "setup":
             result = sync.setup(args.folder, args.automatic)
-        elif args.command in ("sidebar", "colours", "order", "settings"):
+        elif args.command in ("sidebar", "colours", "order", "settings", "marks"):
             result = sync.set_exchange_option(args.command, args.mode == "on")
         elif args.command in ("pause", "resume"):
             result = sync.set_paused(args.command == "pause")

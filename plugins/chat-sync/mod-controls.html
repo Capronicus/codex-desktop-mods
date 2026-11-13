@@ -89,7 +89,7 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 'use strict';
 const el = id => document.getElementById(id);
 const features = {wideChat:'Wider chats',petDock:'Pet in the chat margin',petMotion:'Pet runs while scrolling',timestamps:'Message timestamps',tokens:'Turn and chat token counts',branchLines:'Lines between branched chats'};
-const options = {colours:['Colours and saved swatches','set_colour_sync'],settings:['Appearance and chat preferences','set_settings_sync'],sidebar:['Projects and sections','set_sidebar_sync'],tree:['Subsection tree','set_tree_sync'],order:['Pins and order','set_pin_order_sync']};
+const options = {colours:['Colours and saved swatches','set_colour_sync'],settings:['Appearance and chat preferences','set_settings_sync'],sidebar:['Projects and sections','set_sidebar_sync'],tree:['Subsection tree','set_tree_sync'],order:['Pins and order','set_pin_order_sync'],marks:['Bookmarks, saved views and text animations','set_marks_sync']};
 const pending = new Map();
 let seq = 0, state, working = true;
 let preview=null, visibleChanges=25;

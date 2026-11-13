@@ -142,6 +142,7 @@ def status():
         "sidebar": bool(cfg and cfg.get("sidebar")),
         "order": bool(cfg and cfg.get("order")),
         "tree": bool(cfg and cfg.get("tree")),
+        "marks": bool(cfg and cfg.get("marks")),
         "device_name": cfg and cfg.get("device_name"),
         "device_emoji": cfg and cfg.get("device_emoji", ""),
         "sidebar_preview": {k: preview[k] for k in ("id", "counts") if k in preview} or None,
@@ -160,7 +161,7 @@ def last_folder_check(cfg):
 
 
 def set_exchange_option(option, enabled):
-    if option not in ("colours", "sidebar", "order", "settings", "tree") or type(enabled) is not bool:
+    if option not in ("colours", "sidebar", "order", "settings", "tree", "marks") or type(enabled) is not bool:
         raise ValueError("Unknown sync option")
     with lock(STATE / "sync.lock"):
         cfg = read_json(CONFIG)
@@ -172,6 +173,9 @@ def set_exchange_option(option, enabled):
             cfg["order"] = cfg["tree"] = False
         if option == "settings" and not enabled:
             (STATE / "settings-preview.json").unlink(missing_ok=True)
+        if option == "marks" and not enabled:
+            for name in ("renderer-marks.json", "renderer-marks-apply.json"):
+                (STATE / name).unlink(missing_ok=True)
         if option in ("sidebar", "order","tree") and not enabled:
             queue = STATE / "sidebar-layout-pending.json"
             pending = read_json(queue, {})
@@ -940,6 +944,13 @@ def run(automatic=False):
             set(snapshots) | imported_ids,
             origins,
         )
+        import chat_actions
+        try:
+            arrived = chat_actions.announce(cfg, vault, private)
+        except (OSError, ValueError):
+            arrived = 0  # The notice is a convenience. The inbox still lists the handoff.
+        if arrived:
+            stats["handoffs_received"] = arrived
         if cfg.get("sidebar"):
             import sidebar
 
@@ -979,6 +990,15 @@ def run(automatic=False):
                 stats["settings"] = settings.exchange(HOME, vault, device)
             except (OSError, EOFError, ValueError, subprocess.SubprocessError) as exc:
                 stats["settings"] = {"error": str(exc)}
+        if cfg.get("marks"):
+            import marks
+
+            try:
+                stats["marks"] = marks.exchange(cfg, vault)
+            except Busy:
+                stats["marks"] = {"waiting_for_desktop": 1}  # A bookmark is being edited right now.
+            except (OSError, ValueError) as exc:
+                stats["marks"] = {"error": str(exc)}
         atomic(STATE / "last.json", encode(stats))
         return stats
 
