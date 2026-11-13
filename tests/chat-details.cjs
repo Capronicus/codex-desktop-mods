@@ -32,7 +32,29 @@ const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:pa
   const record=exact(t3,30,190);await fs.appendFile(file,record.slice(0,-7));
   data=await handler(event,id,[t3]);assert.equal(data[t3].total,undefined);
   await fs.appendFile(file,record.slice(-7)+done(t3));data=await handler(event,id,[t3]);assert.equal(data[t3].tokens,30);assert.equal(data[t3].total,190);
+  // Optional counters give a per-turn breakdown. Records without them keep only the totals.
+  assert.equal(data[t3].parts,undefined);
+  const id2=id.slice(0,-1)+'2', usage=(input,cached,output,reasoning)=>({input_tokens:input,cached_input_tokens:cached,output_tokens:output,reasoning_output_tokens:reasoning,total_tokens:input+output});
+  const split=(last,total)=>line('event_msg',{type:'token_count',info:{last_token_usage:last,total_token_usage:total}});
+  await fs.writeFile(path.join(archive,'rollout-legacy-'+id2+'.jsonl'),
+    start(t1)+split(usage(20,5,10,2),usage(20,5,10,2))+split(usage(30,10,10,4),usage(50,15,20,6))+done(t1)+
+    start(t2)+line('token_usage_record',{turn_id:t2,turn_token_usage:usage(40,10,20,0),thread_token_usage:usage(90,25,40,6)})+done(t2)+
+    start(t3)+split(usage(7,0,3,0),usage(97,25,43,6))+line('event_msg',{type:'token_count',info:{total_token_usage:{total_tokens:150}}})+done(t3));
+  data=await handler(event,id2,[t1,t2,t3]);
+  assert.deepEqual(data[t1].parts,{input:50,cached:15,output:20,reasoning:6});assert.equal(data[t1].tokens,70);
+  assert.deepEqual(data[t2].parts,{input:40,cached:10,output:20,reasoning:0});assert.equal(data[t2].total,130);
+  assert.equal(data[t3].tokens,20);assert.equal(data[t3].parts,undefined);
+  assert.ok(data[t1].end>=data[t1].start);
+  const jsxStub={jsx:(name,props)=>({name,props}),jsxs:(name,props)=>({name,props}),Fragment:'fragment'};
+  const view=new Function('document','window','Intl',await fs.readFile(path.join(codeDir,'chat-details.js'),'utf8')+'\nreturn {ChatDetailLine,chatDetailDuration};')(
+    {createElement:()=>({}),head:{append(){}}},{localChatDetails:{visuals:{}}},Intl);
+  assert.deepEqual([4200,65000,3725000].map(view.chatDetailDuration),['4 s','1 min 05 s','1 h 02 min']);
+  const react={useMemo:f=>f(),useSyncExternalStore:()=>({start:1000,reply:30000,end:43000,tokens:70,total:70,parts:data[t1].parts})};
+  const shown=view.ChatDetailLine({entry:{conversationId:id2,turnId:t1,turnStatus:'completed'},role:'assistant',React:react,jsx:jsxStub}).props.children;
+  assert.deepEqual(shown.filter(node=>node.props).map(node=>node.props.children).slice(1),['took 42 s','70 tokens this turn · 70 chat total']);
+  assert.match(shown.at(-1).props.title,/^This turn: 50 input \(15 cached\), 20 output \(6 reasoning\)\. /);
   console.log('PASS exact per-turn and chat snapshots, multi-call legacy deltas, duplicate events, missing usage, incomplete append, only selected turns, unsafe path and frame denial.');
+  console.log('PASS token breakdown, turns without one, and the turn duration line.');
   const before=await handler(event,id,[t1,t2,t3]);
   const compressed=file+'.zst';
   await fs.writeFile(compressed,zlib.zstdCompressSync(await fs.readFile(file)));

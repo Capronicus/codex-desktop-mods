@@ -18,6 +18,7 @@ import chat_actions
 import sharing_rules
 import hierarchy
 import bookmarks
+import maintenance
 
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 STOP = threading.Event()
@@ -59,6 +60,11 @@ TOOLS = [
          {"name": {"type": "string"}, "emoji": {"type": "string"}}),
     tool("check_sync_folder", "Verify the blocks referenced by current shared chat revisions and save a local report.", readonly=True),
     tool("repair_sync_folder", "Restore missing or damaged blocks of current shared chat revisions from eligible matching local history."),
+    tool("compact_sync_folder", "Preview the space held by superseded chat revisions and unreferenced blocks older than a week. Pass apply to remove them.",
+         {"apply": {"type": "boolean"}}, optional=("apply",)),
+    tool("list_sync_devices", "List the desktops in the sync folder with their chat counts and last receipt time.", readonly=True),
+    tool("retire_sync_device", "Preview removing a desktop that no longer syncs: its chat heads, receipt and handoffs. Pass the preview's review ID to remove them.",
+         {"device": {"type": "string"}, "review": {"type": "string"}}, optional=("review",)),
     {**tool("mod_controls_sync", "Exchange chats with this desktop's configured folder."),
      "_meta": {"ui": {"visibility": ["app"]}}},
     tool("set_sync_paused", "Pause or resume chat sync on this desktop, keeping its sharing rules.",
@@ -166,6 +172,9 @@ ACTIONS = {
     "mod_controls_sync": controls.sync_now,
     "check_sync_folder": integrity.inspect_folder,
     "repair_sync_folder": lambda: integrity.inspect_folder(repair=True),
+    "compact_sync_folder": maintenance.compact,
+    "list_sync_devices": maintenance.devices,
+    "retire_sync_device": maintenance.retire,
     "set_sync_paused": sync.set_paused,
     "sidebar_batch_chat_choices": hierarchy.group_chats,
     "sidebar_batch": hierarchy.group_batch,

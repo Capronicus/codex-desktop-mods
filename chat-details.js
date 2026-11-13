@@ -3,6 +3,18 @@
 const chatDetailStores = new Map();
 const chatDetailDate = new Intl.DateTimeFormat(undefined, {dateStyle:'medium', timeStyle:'short'});
 const chatDetailNumber = new Intl.NumberFormat();
+function chatDetailDuration(ms) {
+  const seconds=Math.round(ms/1000), minutes=Math.floor(seconds/60);
+  if(seconds<60)return seconds+' s';
+  if(minutes<60)return minutes+' min '+String(seconds%60).padStart(2,'0')+' s';
+  return Math.floor(minutes/60)+' h '+String(minutes%60).padStart(2,'0')+' min';
+}
+function chatDetailBreakdown(parts) {
+  if(!parts)return '';
+  const n=value=>chatDetailNumber.format(value);
+  return 'This turn: '+n(parts.input)+' input'+(parts.cached?' ('+n(parts.cached)+' cached)':'')+', '+
+    n(parts.output)+' output'+(parts.reasoning?' ('+n(parts.reasoning)+' reasoning)':'')+'. ';
+}
 const chatDetailStyle = {fontSize:'11px', lineHeight:'16px', color:'var(--color-text-secondary, GrayText)', marginBlock:'3px', fontVariantNumeric:'tabular-nums'};
 const chatDetailStyles=document.createElement('style');
 chatDetailStyles.textContent=`
@@ -89,13 +101,15 @@ function ChatDetailLine({entry,role,React,jsx}) {
     if(Number.isFinite(date.getTime()))text.push(jsx.jsx('time',{ref:timeRef,dateTime:date.toISOString(),title:date.toLocaleString(),children:chatDetailDate.format(date)},'time'));
   }
   const finished=record?.end || ['completed','interrupted','failed'].includes(entry.turnStatus??turn?.status);
+  if(window.localChatDetails?.visuals?.timestamps !== false && !user && finalBlock && Number.isFinite(record?.start) && Number.isFinite(record?.end) && record.end>=record.start)
+    text.push(jsx.jsx('span',{title:'From the start of this turn until it finished.',children:'took '+chatDetailDuration(record.end-record.start)},'duration'));
   if(window.localChatDetails?.visuals?.tokens !== false && !user && finalBlock && finished && Number.isSafeInteger(record?.total)){
     const total=chatDetailNumber.format(record.total);
     const usage=Number.isSafeInteger(record.tokens)?chatDetailNumber.format(record.tokens)+' tokens this turn · '+total+' chat total':total+' tokens in chat';
-    text.push(jsx.jsx('span',{title:'Recorded input and output tokens across all model calls. Chat total through this turn.',children:usage},'tokens'));
+    text.push(jsx.jsx('span',{title:chatDetailBreakdown(record.parts)+'Recorded input and output tokens across all model calls. Chat total through this turn.',children:usage},'tokens'));
   }
   if(!text.length)return null;
-  return jsx.jsxs('div',{'data-local-chat-detail':role,style:{...chatDetailStyle,textAlign:user?'end':'start'},children:[text[0],text[1]?' · ':null,text[1]]});
+  return jsx.jsxs('div',{'data-local-chat-detail':role,style:{...chatDetailStyle,textAlign:user?'end':'start'},children:text.flatMap((node,i)=>i?[' · ',node]:[node])});
 }
 
 const originPanes = new Set();

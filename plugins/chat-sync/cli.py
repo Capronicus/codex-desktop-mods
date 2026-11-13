@@ -8,6 +8,7 @@ import sync
 import projects, delivery, batches
 import integrity
 import outgoing
+import maintenance
 
 
 def main():
@@ -24,6 +25,11 @@ def main():
     sharing.add_argument("--page", type=int, default=0)
     sub.add_parser("check-folder")
     sub.add_parser("repair-folder")
+    sub.add_parser("compact-folder").add_argument("--apply", action="store_true")
+    sub.add_parser("devices")
+    retire = sub.add_parser("retire-device")
+    retire.add_argument("device")
+    retire.add_argument("--review", default="")
     sub.add_parser("sync-colours")
     sub.add_parser("sync-settings")
     sub.add_parser("settings").add_argument("mode", choices=("on", "off"))
@@ -113,6 +119,12 @@ def main():
             result = sync.sync_colours_now()
         elif args.command in ("check-folder", "repair-folder"):
             result = integrity.inspect_folder(repair=args.command == "repair-folder")
+        elif args.command == "compact-folder":
+            result = maintenance.compact(args.apply)
+        elif args.command == "devices":
+            result = maintenance.devices()
+        elif args.command == "retire-device":
+            result = maintenance.retire(args.device, args.review)
         elif args.command == "preview-sharing":
             result = outgoing.preview(args.group, args.search, args.page)
         elif args.command == "sync":
