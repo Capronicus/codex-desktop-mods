@@ -145,7 +145,8 @@ async function cscPetContextMenu(event) {
   if (!bridge?.showContextMenu || !window.localChatDetails?.openModControls) return;
   event.preventDefault();
   event.stopPropagation();
-  const selection = await bridge.showContextMenu([{id: 'mod-controls', label: 'Mod Controls'}, {id:'handoffs',label:'Reply handoffs'}]);
+  const selection = await bridge.showContextMenu([{id: 'mod-controls', label: 'Mod Controls'}, {id:'handoffs',label:'Reply handoffs'},{id:'bookmarks',label:'Bookmarks'}]);
+  if (selection?.id === 'bookmarks') await window.localChatDetails.openModControls({action:'bookmarks'});
   if (selection?.id === 'handoffs') await window.localChatDetails.openModControls({action:'inbox'});
   if (selection?.id === 'mod-controls') await window.localChatDetails.openModControls();
 }

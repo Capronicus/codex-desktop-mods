@@ -4,6 +4,7 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
   if (window.localChatDetails?.visuals?.branchLines !== false) installForkLines();
   installDeliveryStatus();
   installChatActions();
+  if (typeof installSidebarViews === 'function') installSidebarViews();
   const prefix = 'codex.sidebar-colours.v1/';
   const projectAttr = 'data-app-action-sidebar-project-id';
   const projectListAttr = 'data-app-action-sidebar-project-list-id';
@@ -729,7 +730,8 @@ function installChatActions() {
     const nativeReply=event.target.closest('[data-response-annotation-target]');
     const reply=marker && marker.dataset.cscReplyRole!=='user' && (marker.dataset.cscReplyRole!=='turn' || nativeReply ||
       event.target.closest('[data-local-conversation-final-assistant],[data-local-chat-detail="assistant"],[data-markdown-text-style="assistant-message"]'));
-    if(!reply && !words)return;
+    const bookmark=wordAnimations?.bookmark(event.target,words);
+    if(!reply && !words && !bookmark)return;
     const selected=String(window.getSelection()||'');
     const anchor=event.target.closest('a,code');
     let ref=selected.trim() || fileRef?.getAttribute('data-markdown-copy-text') || anchor?.getAttribute('href') || anchor?.textContent || '';
@@ -742,14 +744,16 @@ function installChatActions() {
     event.preventDefault();event.stopPropagation();
     try {
       const items=reply?[{id:'handoff',label:'Hand off this reply…'},{id:'file',label:'Open local copy…'}]:[];
+      if(bookmark)items.push({id:'bookmark',label:words?'Bookmark selection…':'Bookmark message…'});
       if(words)items.push({id:'animate',label:words.label});
       if(selected)items.push({id:'copy',label:'Copy selection'});
       items.push({id:'select',label:'Select all'});
       const choice=await window.electronBridge.showContextMenu(items);
+      if(choice?.id==='bookmark')await api.openModControls(bookmark);
       if(choice?.id==='animate')words?.apply();
       if(choice?.id==='copy')await navigator.clipboard.writeText(selected);
       if(choice?.id==='select')document.execCommand('selectAll');
-      if(choice?.id==='file' || choice?.id==='handoff')await api.openModControls({...args,action:choice.id,reference:choice.id==='file'?ref:''});
+      if(choice?.id==='file' || choice?.id==='handoff')await api.openModControls({...args,action:choice.id,reference:choice.id==='file'||fileRef?ref:''});
     } catch(error){notice(error.message);}
   },true);
 
@@ -757,21 +761,34 @@ function installChatActions() {
   async function navigate(command) {
     currentJump=command.id;
     const {thread,turn,item}=command;
-    await api.openChat(thread);
-    if(!turn)return;
+    if(!command.cloud)await api.openChat(thread);
+    if(!turn && !command.anchor)return;
     const until=performance.now()+18000;
     let previousTop=null,railTried=false;
     while(currentJump===command.id && performance.now()<until) {
       await new Promise(resolve=>setTimeout(resolve,110));
+      if(command.anchor){
+        const exact=wordAnimations?.jump(document,command.anchor);
+        if(exact){if(exact==='changed')notice('The saved phrase changed. Showing its message.');return;}
+      }
       const pane=[...document.querySelectorAll('[data-thread-user-message-navigation-content]')].find(n=>
         n.clientHeight && n.querySelector(markerSelector)?.dataset.cscOriginThread===thread);
-      if(!pane)continue;
+      if(!pane){
+        if(command.cloud){
+          const cloud=document.querySelector('[data-chatgpt-selection-conversation-id="'+CSS.escape(thread)+'"],[data-response-annotation-conversation="'+CSS.escape(thread)+'"]');
+          let scroll=cloud;
+          while(scroll && !(scroll.scrollHeight>scroll.clientHeight && /auto|scroll/.test(getComputedStyle(scroll).overflowY)))
+            scroll=scroll.parentElement;
+          if(scroll && scroll.scrollTop>0)scroll.scrollBy({top:-Math.max(180,scroll.clientHeight*.8),behavior:'instant'});
+        }
+        continue;
+      }
       const rows=[...pane.querySelectorAll(markerSelector)].filter(m=>m.dataset.cscReplyTurn===turn && m.dataset.cscReplyRole!=='user');
       const nativeItem=item && rows.map(m=>m.closest('[data-turn-key]')?.querySelector(
         '[data-response-annotation-target="'+CSS.escape(item)+'"]')).find(Boolean);
       const match=item ? rows.find(m=>m.dataset.cscReplyItem===item) : rows.at(-1);
       const row=nativeItem || match?.closest('[data-turn-key]');
-      if(row){row.scrollIntoView({block:'center',behavior:'instant'});
+      if(row && !command.anchor){row.scrollIntoView({block:'center',behavior:'instant'});
         row.animate?.([{outline:'2px solid Highlight'},{outline:'2px solid transparent'}],{duration:1600});return;}
       // The native rail can jump directly even if the turn has not mounted.
       if(!railTried){
@@ -785,7 +802,7 @@ function installChatActions() {
         scroller.scrollBy({top:-Math.max(180,scroller.clientHeight*.8),behavior:'instant'});
       }
     }
-    if(currentJump===command.id) notice('The reply is available under Reply handoffs in Mod Controls.');
+    if(currentJump===command.id) notice(command.anchor?'The bookmarked message could not be located in this chat.':'The reply is available under Reply handoffs in Mod Controls.');
   }
   function measure() {
     if(measuring)return;
@@ -819,6 +836,6 @@ function installChatActions() {
   }
   api.listenActions(command=>{
     if(command.action==='measure')measure();
-    else if(command.action==='navigate')navigate(command).catch(e=>notice(e.message));
+    else if(command.action==='navigate'||command.action==='bookmark')navigate(command).catch(e=>notice(e.message));
   });
 }

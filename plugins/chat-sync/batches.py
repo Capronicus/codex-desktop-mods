@@ -15,6 +15,8 @@ def summarize(changes):
         kind, ident = key.split("/")
         if kind in ("project", "section"):
             action = kind + ("_created" if old is None else "_renamed")
+        elif kind == "parent":
+            action = "subsections_moved"
         elif kind == "order":
             action = "lists_reordered"
         elif kind == "chat-pin":
@@ -47,6 +49,10 @@ def preview_names(changes, rows, current, index):
             target = {"projects": "project", "sections": "section", "pins": "chat"}[ident]
             for item in (before or []) + (after or []):
                 add(target, item)
+        elif kind == "parent":
+            add("section", ident)
+            for value in (before,after):
+                if value: add("section" if value.startswith("custom:") else "project",value.removeprefix("custom:"))
         elif kind.startswith("chat-"):
             add("chat", ident)
             if kind in ("chat-project", "chat-section"):
@@ -77,7 +83,7 @@ def begin(home, device, review, changes, native, pinned, rows):
             None if targets[pin] else rows.get(section, [0, None, native.get(section)])[2]
         )
     for key, after in targets.items():
-        if key.startswith("order/"):
+        if key.startswith(("parent/","order/")):
             continue
         original = undo["native"].get(key, [native.get(key)])[0]
         undo["native"][key] = [original, after]
@@ -225,7 +231,7 @@ def undo_locked(home, cfg):
         if layout.path.read_bytes() != layout.original or desktop_layout.desktop_running():
             raise ValueError("The desktop reopened while undo was running. Quit it and retry.")
         sync.atomic(layout.path, sync.encode(restored))
-    cfg.update(sidebar=False, order=False)
+    cfg.update(sidebar=False, order=False, tree=False)
     sync.atomic(directory / "config.json", sync.encode(cfg))
     for name in (JOURNAL, desktop_layout.QUEUE, "sidebar-preview.json"):
         (directory / name).unlink(missing_ok=True)

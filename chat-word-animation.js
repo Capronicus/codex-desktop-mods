@@ -65,7 +65,7 @@ function cscWordAnimations() {
     if (!text.trim() || text !== range.toString()) return;
     const tag = JSON.stringify([msg.key, start, end, signature(text)]);
     const overlaps = [...(saved.get(msg.key)?.entries() || [])].filter(([, m]) => m.start < end && m.end > start);
-    return {label:overlaps.length ? 'Remove text animation' : 'Animate selected text', apply() {
+    return {tag, excerpt:text, label:overlaps.length ? 'Remove text animation' : 'Animate selected text', apply() {
       for (const [id] of overlaps) {localStorage.removeItem(prefix + id); forget(id);}
       if (!overlaps.length) {localStorage.setItem(prefix + tag, '1'); remember(tag);}
       watch();
@@ -182,5 +182,38 @@ function cscWordAnimations() {
   }
   window.addEventListener('storage', event => {if (!event.key || event.key.startsWith(prefix)) load();});
   load();
-  return {capture};
+  function bookmark(target, selection) {
+    const msg=message(target);
+    if(!msg)return;
+    const address=JSON.parse(msg.key), cloud=address[0]==='cloud';
+    const thread=cloud?(target.closest('[data-chatgpt-selection-conversation-id]')?.dataset.chatgptSelectionConversationId ||
+      target.closest('[data-response-annotation-conversation]')?.dataset.responseAnnotationConversation):address[1];
+    if(!thread)return;
+    return {action:'new-bookmark',thread,turn:cloud?'':address[2],item:cloud?address[1]:address[4],
+      anchor:selection?.tag||JSON.stringify([msg.key,0,0,'']),label:(selection?.excerpt||msg.root.textContent).trim().slice(0,100)};
+  }
+  function jump(scope, anchor) {
+    const [key,start,end,hash]=JSON.parse(anchor);
+    for(const element of scope.querySelectorAll(bodies)){
+      const msg=message(element);
+      if(msg?.key!==key || !msg.root.checkVisibility())continue;
+      if(end===0){msg.root.scrollIntoView({block:'center'});return true;}
+      let offset=0, range;
+      for(const node of textNodes(msg.root)){
+        const next=offset+node.length;
+        if(!range && start<next){range=new Range();range.setStart(node,start-offset);}
+        if(range && end<=next){
+          range.setEnd(node,end-offset);
+          if(signature(range.toString())!==hash)break;
+          range.startContainer.parentElement.scrollIntoView({block:'center'});
+          const sel=getSelection();sel.removeAllRanges();sel.addRange(range);return true;
+        }
+        offset=next;
+      }
+      msg.root.scrollIntoView({block:'center'});
+      return 'changed';
+    }
+    return false;
+  }
+  return {capture,bookmark,jump};
 }

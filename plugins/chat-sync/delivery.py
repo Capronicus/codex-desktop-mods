@@ -140,7 +140,7 @@ def exchange(vault, cfg, heads, accepted, busy, stats, state, private, visible, 
         }
     for tid in private:
         result[tid] = {"status": "local_only", "received_by": [], "waiting_on": []}
-    save(sync.STATE / "delivery.json", {"device": dev, "chats": result})
+    save(sync.STATE / "delivery.json", {"device": dev, "peers": {device: row["name"][:60] for device, row in peers.items()}, "chats": result})
 
 
 def status(thread):

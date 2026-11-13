@@ -82,7 +82,7 @@ def publish_roots(cfg, vault):
         delivery.save(path, data)
 
 
-def resolve_file(thread, reference):
+def resolve_file(thread, reference, *, allow_missing=False, relative=False):
     checked_id(thread)
     cfg, vault = projects.config()
     index = sync.catalog()
@@ -116,9 +116,9 @@ def resolve_file(thread, reference):
     file = checkout.joinpath(*source.parts).resolve()
     if checkout not in file.parents or projects.folder_excluded(str(file), {"private_folders":sharing.excluded_folders}):
         raise ValueError("The file is outside the shared checkout.")
-    if not file.is_file():
+    if not allow_missing and not file.is_file():
         raise ValueError("This file is missing from the linked checkout on this PC.")
-    return file
+    return file.relative_to(checkout).as_posix() if relative else file
 
 
 def open_file(thread, reference):
@@ -201,7 +201,19 @@ def reply(thread, turn, item=""):
     return {"text": last["text"][:16000], "truncated": len(last["text"]) > 16000}
 
 
-def handoff(thread, turn, device, request, note="", item=""):
+def fingerprint(file):
+    value = hashlib.sha256()
+    with file.open("rb") as stream:
+        before = os.fstat(stream.fileno())
+        for block in iter(lambda:stream.read(1024*1024),b""):
+            value.update(block)
+        after = os.fstat(stream.fileno())
+    if (before.st_size,before.st_mtime_ns) != (after.st_size,after.st_mtime_ns):
+        raise ValueError("The file changed during comparison. Try again.")
+    return value.hexdigest()
+
+
+def handoff(thread, turn, device, request, note="", item="", reference=""):
     for ident in (thread, turn, device, request):
         checked_id(ident)
     if not isinstance(note, str) or len(note) > 500 or not isinstance(item, str) or len(item) > 160:
@@ -216,10 +228,13 @@ def handoff(thread, turn, device, request, note="", item=""):
         reply(thread, turn, item)
         path = vault / "handoffs-v1" / device / cfg["device"] / (request + ".json")
         obj = {"thread": thread, "turn": turn, "item": item, "note": note}
+        if reference:
+            obj["file"] = resolve_file(thread, reference, relative=True)
         old = sync.read_json(path, {})
-        if old and obj != {k: old.get(k) for k in obj}:
+        if old and (obj != {k: old.get(k) for k in obj} or old.get("file") != obj.get("file")):
             raise ValueError("This handoff was already sent.")
         if not old:
+            if reference: obj["sha256"] = fingerprint(resolve_file(thread,reference))
             sync.atomic(path, sync.encode({**obj, "created": int(time.time())}))
         return {"sent": True}
 
@@ -242,8 +257,21 @@ def inbox():
         if not isinstance(obj.get("note"), str) or not isinstance(obj.get("item"), str) or type(obj.get("created")) is not int:
             continue
         result.append({**{k: obj[k] for k in ("thread","turn","created")}, "item": obj["item"][:160],
-                       "note": obj["note"][:500], "sender": sender, "name": labels.get(sender, sender), "id": f.stem})
+                       "note": obj["note"][:500], "file": obj.get("file","") if isinstance(obj.get("file"),str) and isinstance(obj.get("sha256"),str) and sync.HEX.fullmatch(obj["sha256"]) else "", "sender": sender, "name": labels.get(sender, sender), "id": f.stem})
     return sorted(result, key=lambda r: -r["created"])
+
+
+def compare_handoff_file(sender, request):
+    checked_id(sender)
+    checked_id(request)
+    cfg, vault = projects.config()
+    obj = projects.peer_file(vault / "handoffs-v1" / cfg["device"] / sender / (request+".json"))
+    reference, digest = obj.get("file"), obj.get("sha256")
+    if not isinstance(reference,str) or not isinstance(digest,str) or not sync.HEX.fullmatch(digest):
+        raise ValueError("This handoff has no file fingerprint.")
+    local = resolve_file(obj["thread"], reference, allow_missing=True)
+    state = "Missing here" if not local.is_file() else "Same version" if fingerprint(local)==digest else "Changed here"
+    return {"status":state,"reference":reference}
 
 
 def dismiss(sender, request):
@@ -337,6 +365,9 @@ def desktop_context():
     doc = sync.read_json(sync.STATE / "desktop-request.json", {})
     if not isinstance(doc.get("at"), (int, float)) or not 0 <= time.time() - doc["at"] / 1000 < 600:
         return {}
+    if doc.get("action") == "new-bookmark":
+        from bookmarks import account_id
+        if doc.get("account") != account_id(): return {}
     return doc
 
 

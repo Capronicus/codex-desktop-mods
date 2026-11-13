@@ -8,7 +8,7 @@ async function run() {
     const page = await browser.newPage();
     const markup = '<div data-turn-key="first"><span hidden data-csc-origin-thread="t" data-csc-reply-turn="r" data-csc-reply-role="turn"></span>' +
       '<div data-user-message-bubble>again <b>again</b> please</div><div data-response-annotation-target="answer">again please</div></div>' +
-      '<div data-chatgpt-selection-message-id="cloud">again please</div>';
+      '<div data-chatgpt-selection-conversation-id="conversation" data-chatgpt-selection-message-id="cloud">again please</div>';
     await page.route('http://fixture.test/', r=>r.fulfill({contentType:'text/html',body:markup}));
     await page.goto('http://fixture.test/');
     async function init() {
@@ -54,6 +54,27 @@ async function run() {
       assert.equal(await toggle(sel,sel,0,5),'Remove text animation');
     }
     assert.equal(await page.evaluate(()=>localStorage.length),0);
+    await toggle('b',user,0,7);
+    const bookmark=await page.evaluate(()=>{
+      const engine=cscWordAnimations(), target=document.querySelector('b');
+      const mark=engine.bookmark(target,engine.capture(target));
+      getSelection().removeAllRanges();
+      target.replaceWith(target.cloneNode(true));
+      const found=engine.jump(document,mark.anchor);
+      return {mark,found,selection:getSelection().toString(),tag:getSelection().anchorNode.parentElement.tagName};
+    });
+    assert.equal(bookmark.mark.thread,'t');assert.equal(bookmark.found,true);
+    assert.equal(bookmark.selection,'again please');assert.equal(bookmark.tag,'B');
+    assert.equal(await page.evaluate(anchor=>{
+      document.querySelector('b').textContent='other';
+      return cscWordAnimations().jump(document,anchor);
+    },bookmark.mark.anchor),'changed');
+    const cloudMark=await page.evaluate(()=>{
+      const engine=cscWordAnimations(), target=document.querySelector('[data-chatgpt-selection-message-id]');
+      const mark=engine.bookmark(target);
+      return {thread:mark.thread,found:engine.jump(document,mark.anchor)};
+    });
+    assert.deepEqual(cloudMark,{thread:'conversation',found:true});
     console.log('Selected occurrence pulses across Markdown, survives reload and row replacement, respects reduced motion and can be removed in local and cloud chats.');
   } finally {await browser.close();}
 }

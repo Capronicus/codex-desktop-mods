@@ -7,11 +7,13 @@ import sys
 import tempfile
 import unittest
 import uuid
+import time
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import chat_actions as actions
 import projects
+import bookmarks
 import sharing_rules
 import sync
 
@@ -103,6 +105,46 @@ class ChatActions(unittest.TestCase):
             with self.assertRaises(ValueError):actions.reply(self.thread,self.turn,"an-unrelated-item")
             actions.dismiss(self.work,nonce)
             self.assertEqual(actions.inbox(),[])
+
+    def test_bookmarks_are_local_and_account_scoped(self):
+        nonce = ident()
+        anchor = json.dumps([json.dumps(["local",self.thread,self.turn,"assistant","reply"]),2,7,"hash"])
+        with self.on(self.home) as h:
+            req = {"action":"new-bookmark","id":nonce,"account":"first","at":int(time.time()*1000),
+                   "thread":self.thread,"turn":self.turn,"item":"reply","anchor":anchor}
+            sync.atomic(h/"auth.json",sync.encode({"tokens":{"account_id":"first"}}))
+            sync.atomic(sync.STATE/"desktop-request.json",sync.encode(req))
+            bookmarks.edit("add",nonce,"File decision")
+            bookmarks.edit("rename",nonce,"Second occurrence")
+            self.assertEqual(bookmarks.list_marks()[0]["label"],"Second occurrence")
+            bookmarks.edit("open",nonce)
+            self.assertEqual(sync.read_json(sync.STATE/"desktop-command.json")["anchor"],anchor)
+            sync.atomic(h/"auth.json",sync.encode({"tokens":{"account_id":"other"}}))
+            self.assertEqual(bookmarks.list_marks(),[])
+            self.assertEqual(actions.desktop_context(),{})
+            with self.assertRaises(ValueError): bookmarks.edit("add",nonce,"Other")
+            sync.atomic(h/"auth.json",sync.encode({"tokens":{"account_id":"first"}}))
+            bookmarks.edit("remove",nonce)
+            self.assertEqual(bookmarks.list_marks(),[])
+        self.assertFalse(list(self.vault.rglob("*bookmark*")))
+
+    def test_handoff_file_states(self):
+        request=ident()
+        with self.on(self.work) as h:
+            file=h/"checkout"/"design.txt"
+            file.write_bytes(b"Known fixture")
+            actions.handoff(self.thread,self.turn,self.home,request,reference=str(file))
+            payload=sync.read_json(self.vault/"handoffs-v1"/self.home/self.work/(request+".json"))
+            self.assertEqual(payload["file"],"design.txt")
+            self.assertNotIn(str(h),json.dumps(payload))
+            self.assertNotIn("Known fixture",json.dumps(payload))
+        with self.on(self.home) as h:
+            file=h/"checkout"/"design.txt"
+            for contents,status in [(None,"Missing here"),(b"another","Changed here"),(b"Known fixture","Same version")]:
+                if contents: file.write_bytes(contents)
+                self.assertEqual(actions.compare_handoff_file(self.work,request)["status"],status)
+            projects.set_private("chat",self.thread,True)
+            with self.assertRaises(ValueError): actions.compare_handoff_file(self.work,request)
 
     def test_both_rule_scopes_and_resume(self):
         with self.on(self.work) as h:

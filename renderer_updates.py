@@ -18,7 +18,7 @@ def adapt(role, source, files, pet_assets):
     header, body = source.split('{', 1)
     require = header[:-1].split(',')[-1]
     if role == 'prefs':
-        factory = files('chat-word-animation.js') + '\n' + files('sidebar-colours.js')
+        factory = files('sidebar-views.js') + '\n' + files('chat-word-animation.js') + '\n' + files('sidebar-colours.js')
         return header + '{' + f"""
           {require}.d(t,{{sidebarColours:()=>cscGet}});
           let cscInstance;
@@ -197,7 +197,8 @@ def add_pet_controls(data):
     inbox = (b'{id:"reply-handoffs",icon:' + settings['icon'] + b',message:' + settings['message'] +
              b'({id:"local.pet.replyHandoffs",defaultMessage:"Reply handoffs"}),selectAfterClose:!0,'
              b'onSelect:()=>window.localChatDetails.openModControls({action:"inbox"})},')
-    return data[:settings.end()] + item + inbox + data[settings.end():]
+    bookmarks = inbox.replace(b'reply-handoffs',b'message-bookmarks').replace(b'local.pet.replyHandoffs',b'local.pet.bookmarks').replace(b'Reply handoffs',b'Bookmarks').replace(b'action:"inbox"',b'action:"bookmarks"')
+    return data[:settings.end()] + item + inbox + bookmarks + data[settings.end():]
 
 
 

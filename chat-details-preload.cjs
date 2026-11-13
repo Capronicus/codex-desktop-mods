@@ -21,6 +21,7 @@
       attach();
     },
     savePerformance: report => ipcRenderer.invoke('local-chat-actions:performance', report),
+    savedViewData: () => ipcRenderer.invoke('local-sidebar:saved-view-data'),
     delivery: ids => ipcRenderer.invoke('local-chat-sync:delivery', ids),
     colourMembers: (kind,id) => ipcRenderer.invoke('local-sidebar-colours:members',kind,id),
     colours: (mode, entries, previous) => ipcRenderer.invoke('local-sidebar-colours:preferences', mode, entries, previous),

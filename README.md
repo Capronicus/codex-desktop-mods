@@ -37,9 +37,17 @@ Install **Codex Chat Sync** from the same marketplace, then open **Mod Controls*
 
 The six appearance switches work without connecting a folder.
 
+## Bookmarks, saved views and cross-device sidebar tools
+
+- Right-click a chat message or a selected phrase and choose **Bookmark message** or **Bookmark selection**. Give it a name in Mod Controls. Right-click the pet and choose **Bookmarks** to return to it. A changed phrase falls back to its message.
+- Open **Saved views** at the top of the sidebar. Choose **New view** to combine a local project, origin device, last update and outstanding receipt. For example, save **Work this week** or **Tartarus awaiting Home**. Matches open the original local chats. An unknown origin cannot match a device filter. Bookmarks and saved views stay on this desktop.
+- In **Mod Controls → Organize projects and sections**, use **Add to batch** to create nested groups, move sections or move several chats together. Preview the list, choose **Apply batch on quit**, then fully quit and reopen once.
+- To share nesting, enable **Projects and sections** and **Subsection tree** in Mod Controls on each participating desktop. Parent links use shared group IDs. Each PC keeps its linked checkout path.
+- When handing off a reply, optionally include a project file. The receiving PC can compare its linked copy and see **Same version**, **Changed here** or **Missing here**. The handoff includes the project-relative path and a SHA-256 fingerprint. File contents stay in their respective checkouts.
+
 ## Project subsections and group conversions
 
-With **Codex Desktop Mods** and **Codex Chat Sync 0.14.0** installed on this desktop, right-click a local project or a custom section and choose **Organize project…** or **Organize section…**. The same controls are in **Mod Controls → Organize projects and sections**. These local actions work with chat sync disconnected.
+With **Codex Desktop Mods** and **Codex Chat Sync 0.15.0** installed on this desktop, right-click a local project or a custom section and choose **Organize project…** or **Organize section…**. The same controls are in **Mod Controls → Organize projects and sections**. These local actions work with chat sync disconnected.
 
 - Choose **Create subsection** to add a named group inside a project or custom section. The sidebar supports three levels, such as **Studio › Design › References**. A subsection collapses with either parent. Use the usual section menu to add chats.
 - Choose **Convert section to project** to create a real local Codex project and move its local chats there. You can supply a folder. A previously demoted project restores its saved folder paths.
@@ -53,7 +61,7 @@ Select words in a chat message, right-click the selection, and choose **Animate 
 
 ## Files, reply handoffs and chat actions
 
-Update **Codex Desktop Mods** and **Codex Chat Sync** to **0.14.0** on both PCs, apply the desktop mods, then fully quit and reopen the app. Right-click a local assistant reply for **Open local copy** or **Hand off this reply**. Shift + right-click keeps the regular text menu. Right-click a local sidebar chat for **Chat branches** or a project for **Project sharing**.
+Update **Codex Desktop Mods** and **Codex Chat Sync** to **0.15.0** on both PCs, apply the desktop mods, then fully quit and reopen the app. Right-click a local assistant reply for **Open local copy** or **Hand off this reply**. Shift + right-click keeps the regular text menu. Right-click a local sidebar chat for **Chat branches** or a project for **Project sharing**.
 
 Open **Mod Controls → Chat actions and sharing** for the handoff inbox, conflict comparison, project or folder exclusions and the 12-second desktop responsiveness check. [Using chat actions on Home and Work](plugins/chat-sync/README.md#chat-actions-on-home-and-work)
 
@@ -154,4 +162,4 @@ node tests/chat-details.cjs
 python3 tests/updates.py
 ```
 
-With the Linux desktop app and Google Chrome installed, run `node tests/sidebar-colours.cjs` to check the rendered colours in both themes, `node tests/sections.cjs` for section inheritance and `node tests/chat-layout.cjs` to check chat width, panel clearance and scroll behaviour. Run `node tests/animated-words.cjs` to check the selected occurrence, persistence and reduced motion.
+With the Linux desktop app and Google Chrome installed, run `node tests/sidebar-colours.cjs` to check the rendered colours in both themes, `node tests/sections.cjs` for section inheritance and `node tests/chat-layout.cjs` to check chat width, panel clearance and scroll behaviour. Run `node tests/saved-views.cjs` for the sidebar view editor and receipt filters. Run `node tests/animated-words.cjs` to check the selected occurrence, persistence and reduced motion.
