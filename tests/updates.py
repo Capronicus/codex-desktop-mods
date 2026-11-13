@@ -102,6 +102,19 @@ class UpdateTests(unittest.TestCase):
         self.assertFalse((installer.INSTALL/'unsupported.json').exists())
         self.assertNotEqual(self.launches(), [installer.SYSTEM/'ChatGPT'])
 
+    def test_unexpected_patcher_error_opens_the_stock_app(self):
+        self.archive.write_bytes(b'five')
+        with patch.object(installer, 'patch_archive', side_effect=TypeError('missing renderer binding')):
+            self.assertEqual(self.launches(2), [installer.SYSTEM/'ChatGPT'] * 2)
+        self.assertTrue((installer.INSTALL/'unsupported.json').is_file())
+
+    def test_interrupted_staging_is_removed_by_the_next_rebuild(self):
+        stale = installer.CACHE / 'tmpabcd1234' / 'app'
+        stale.mkdir(parents=True)
+        self.archive.write_bytes(b'six')
+        self.launches()
+        self.assertFalse(stale.parent.exists())
+
 
 if __name__ == '__main__':
     unittest.main()

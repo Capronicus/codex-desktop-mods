@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'plugins/chat-sync/**'
+      - 'chat-details-main.cjs'
+      - 'sidebar-views.js'
       - '.github/workflows/chat-sync.yml'
   push:
     branches: [main, codex/device-chat-actions, codex/chat-sync, codex/sidebar-palette, codex/sidebar-sync, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/sync-repair, codex/pet-controls, codex/defer-busy-recovery, codex/sidebar-review-panel, codex/outgoing-chat-preview]
@@ -11,6 +13,7 @@ on:
       - '.agents/plugins/marketplace.json'
       - '.github/workflows/chat-sync.yml'
       - 'plugins/chat-sync/**'
+      - 'chat-details-main.cjs'
 permissions:
   contents: read
 jobs:
@@ -27,6 +30,12 @@ jobs:
       - run: python3 plugins/chat-sync/tests/chat_actions.py
       - run: python3 plugins/chat-sync/tests/sidebar_groups.py
       - run: python3 plugins/chat-sync/tests/sidebar_layout_test.py
+      - run: python3 plugins/chat-sync/tests/maintenance_test.py
+      - run: python3 plugins/chat-sync/tests/incoming_test.py
+      - run: python3 plugins/chat-sync/tests/settings_review_test.py
+      - run: python3 plugins/chat-sync/tests/marks_test.py
+      - run: python3 plugins/chat-sync/tests/archive_test.py
+      - run: python3 plugins/chat-sync/tests/encryption_test.py
       - run: python3 plugins/chat-sync/tests/cross_platform.py seed "$RUNNER_TEMP/seed" --device-state "$RUNNER_TEMP/home-device.json"
       - uses: actions/upload-artifact@v4
         with:
@@ -70,6 +79,12 @@ jobs:
       - run: python plugins/chat-sync/tests/chat_actions.py
       - run: python plugins/chat-sync/tests/sidebar_groups.py
       - run: python plugins/chat-sync/tests/sidebar_layout_test.py
+      - run: python plugins/chat-sync/tests/maintenance_test.py
+      - run: python plugins/chat-sync/tests/incoming_test.py
+      - run: python plugins/chat-sync/tests/settings_review_test.py
+      - run: python plugins/chat-sync/tests/marks_test.py
+      - run: python plugins/chat-sync/tests/archive_test.py
+      - run: python plugins/chat-sync/tests/encryption_test.py
       - run: python plugins/chat-sync/tests/cross_platform.py reply "$env:RUNNER_TEMP/transfer"
       - uses: actions/upload-artifact@v4
         with:

@@ -202,15 +202,25 @@ def reply(thread, turn, item=""):
 
 
 def fingerprint(file):
-    value = hashlib.sha256()
+    """Return the exact digest and, for text, one that reads CRLF and LF checkouts alike."""
+    exact, portable = hashlib.sha256(), hashlib.sha256()
+    text, carry = True, b""
     with file.open("rb") as stream:
         before = os.fstat(stream.fileno())
         for block in iter(lambda:stream.read(1024*1024),b""):
-            value.update(block)
+            exact.update(block)
+            if text and b"\0" in block:
+                text = False
+            if text:
+                # A block can end between the two bytes of one line ending.
+                block = carry + block
+                carry = b"\r" if block.endswith(b"\r") else b""
+                portable.update((block[:-1] if carry else block).replace(b"\r\n",b"\n"))
         after = os.fstat(stream.fileno())
     if (before.st_size,before.st_mtime_ns) != (after.st_size,after.st_mtime_ns):
         raise ValueError("The file changed during comparison. Try again.")
-    return value.hexdigest()
+    portable.update(carry)
+    return exact.hexdigest(), portable.hexdigest() if text else None
 
 
 def handoff(thread, turn, device, request, note="", item="", reference=""):
@@ -234,7 +244,9 @@ def handoff(thread, turn, device, request, note="", item="", reference=""):
         if old and (obj != {k: old.get(k) for k in obj} or old.get("file") != obj.get("file")):
             raise ValueError("This handoff was already sent.")
         if not old:
-            if reference: obj["sha256"] = fingerprint(resolve_file(thread,reference))
+            if reference:
+                obj["sha256"], portable = fingerprint(resolve_file(thread,reference))
+                if portable: obj["text_sha256"] = portable
             sync.atomic(path, sync.encode({**obj, "created": int(time.time())}))
         return {"sent": True}
 
@@ -261,6 +273,29 @@ def inbox():
     return sorted(result, key=lambda r: -r["created"])
 
 
+def announce(cfg, vault, private=()):
+    """Tell the open desktop once about handoffs that arrived since the last pass."""
+    record = sync.STATE / ("handoffs-seen-" + cfg["device"] + ".json")
+    known = sync.read_json(record)
+    done = sync.read_json(sync.STATE / ("handoffs-done-" + cfg["device"] + ".json"), {})
+    current = []
+    for f in (vault / "handoffs-v1" / cfg["device"]).glob("*/*.json"):
+        key = f.parent.name + "/" + f.stem
+        if key in done or not all(projects.valid_id(i) for i in (f.parent.name, f.stem)):
+            continue
+        thread = projects.peer_file(f).get("thread")
+        if projects.valid_id(thread) and thread not in private:
+            current.append(key)
+    # The first pass only records what is already waiting in the inbox.
+    fresh = [] if known is None else [key for key in current if key not in known]
+    if known is None or sorted(current) != sorted(known):
+        sync.atomic(record, sync.encode(sorted(current)))
+    if fresh:
+        sync.atomic(sync.STATE / "desktop-command.json", sync.encode(
+            {"action": "handoffs", "count": len(fresh), "id": str(uuid.uuid4()), "at": int(time.time()*1000)}))
+    return len(fresh)
+
+
 def compare_handoff_file(sender, request):
     checked_id(sender)
     checked_id(request)
@@ -270,8 +305,12 @@ def compare_handoff_file(sender, request):
     if not isinstance(reference,str) or not isinstance(digest,str) or not sync.HEX.fullmatch(digest):
         raise ValueError("This handoff has no file fingerprint.")
     local = resolve_file(obj["thread"], reference, allow_missing=True)
-    state = "Missing here" if not local.is_file() else "Same version" if fingerprint(local)==digest else "Changed here"
-    return {"status":state,"reference":reference}
+    if not local.is_file():
+        return {"status":"Missing here","reference":reference}
+    exact, portable = fingerprint(local)
+    # Git can check the same text out with different line endings on Windows and Linux.
+    same = exact == digest or (portable is not None and portable in (digest, obj.get("text_sha256")))
+    return {"status":"Same version" if same else "Changed here","reference":reference}
 
 
 def dismiss(sender, request):

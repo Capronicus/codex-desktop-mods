@@ -24,3 +24,5 @@ In version 0.15.0, open **Mod Controls → Organize projects and sections** to c
 Select words in a message and right-click for **Animate selected text**. Select marked text for **Remove text animation**. These marks are local to this desktop and follow the reduced-motion preference.
 
 Use **Add to batch** in the organizer to preview a series of creations and moves before applying it on quit. Enable **Subsection tree** separately on both desktops to share nesting. File handoffs can include a relative path and fingerprint for comparison. Right-click a message or selection to bookmark it. Open bookmarks from the pet. Saved views in the sidebar filter local chats by project, origin, age and outstanding receipt. Bookmarks and saved views are local.
+
+When the mods cannot be applied after a desktop update, call `desktop_mods_compatibility`. It lists the renderer modules of the installed build that changed or are missing and, when every module is recognised, the first hook that no longer fits. Report those module IDs and roles. They tell the maintainer what to update.

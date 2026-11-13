@@ -4,9 +4,18 @@ on:
   pull_request:
     paths:
       - 'sidebar-*.js'
+      - 'chat-*.js'
       - 'sidebar-colours.py'
+      - 'windows_mods.py'
       - 'renderer_updates.py'
+      - 'renderer-modules.json'
       - 'chat-details-*.cjs'
+      - 'manager.py'
+      - 'server.py'
+      - 'compatibility.py'
+      - 'tools/**'
+      - 'tests/**'
+      - '.github/workflows/windows.yml'
   push:
     branches: [main, codex/device-chat-actions, windows-port, codex/sidebar-palette, codex/chat-controls, codex/device-origins, codex/mod-controls, codex/pet-controls, codex/recover-desktop-metadata]
 permissions:
@@ -27,6 +36,10 @@ jobs:
           python-version: '3.12'
       - name: Check the installer and native Start menu shortcut
         run: python tests/test_windows.py
+      - name: Check the catalogue report and recorded renderer modules
+        run: |
+          python tests/catalogue_report.py
+          python tests/renderer_fixtures.py
       - name: Install the official ChatGPT desktop package
         shell: powershell
         run: |

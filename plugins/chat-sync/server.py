@@ -18,6 +18,8 @@ import chat_actions
 import sharing_rules
 import hierarchy
 import bookmarks
+import maintenance
+import incoming
 
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 STOP = threading.Event()
@@ -53,12 +55,21 @@ TOOLS = [
          {"group": {"type": "string", "enum": ["all", *outgoing.GROUPS]},
           "search": {"type": "string", "maxLength": 256}, "page": {"type": "integer", "minimum": 0}},
          readonly=True, optional=("group", "search", "page")),
+    tool("preview_incoming_chats", "Preview the chats a sync would add, extend or hold back on this desktop, without receiving them. Pages start at zero.",
+         {"group": {"type": "string", "enum": ["all", *incoming.GROUPS]},
+          "search": {"type": "string", "maxLength": 256}, "page": {"type": "integer", "minimum": 0}},
+         readonly=True, optional=("group", "search", "page")),
     {**tool("undo_sidebar_batch", "Undo the sidebar batch displayed in Mod Controls.",
             {"batch": {"type": "string"}}), "_meta": {"ui": {"visibility": ["app"]}}},
     tool("set_sync_device_label", "Name this desktop and choose one origin emoji. An empty emoji removes it.",
          {"name": {"type": "string"}, "emoji": {"type": "string"}}),
     tool("check_sync_folder", "Verify the blocks referenced by current shared chat revisions and save a local report.", readonly=True),
     tool("repair_sync_folder", "Restore missing or damaged blocks of current shared chat revisions from eligible matching local history."),
+    tool("compact_sync_folder", "Preview the space held by superseded chat revisions and unreferenced blocks older than a week. Pass apply to remove them.",
+         {"apply": {"type": "boolean"}}, optional=("apply",)),
+    tool("list_sync_devices", "List the desktops in the sync folder with their chat counts and last receipt time.", readonly=True),
+    tool("retire_sync_device", "Preview removing a desktop that no longer syncs: its chat heads, receipt and handoffs. Pass the preview's review ID to remove them.",
+         {"device": {"type": "string"}, "review": {"type": "string"}}, optional=("review",)),
     {**tool("mod_controls_sync", "Exchange chats with this desktop's configured folder."),
      "_meta": {"ui": {"visibility": ["app"]}}},
     tool("set_sync_paused", "Pause or resume chat sync on this desktop, keeping its sharing rules.",
@@ -114,12 +125,20 @@ TOOLS = [
         "Opt in or out of local chat pins and sidebar ordering on this device.",
         {"enabled": {"type": "boolean"}},
     ),
+    tool("set_folder_encryption", "Encrypt the chat histories and titles this desktop uploads. Returns the local key file to copy to each other desktop.",
+         {"enabled": {"type": "boolean"}}),
+    tool("set_archive_sync", "Enable or disable archiving and restoring chats here when another desktop archives or restores them.",
+         {"enabled": {"type": "boolean"}}),
+    tool("set_marks_sync", "Enable or disable exchanging this account's bookmarks, saved views and text animations through the configured private folder.",
+         {"enabled": {"type": "boolean"}}),
     tool(
         "set_settings_sync",
         "Enable or disable syncing desktop appearance and chat preferences through this device’s configured private folder.",
         {"enabled": {"type": "boolean"}},
     ),
     tool("sync_settings_now", "Exchange only supported desktop appearance and chat preferences."),
+    tool("preview_settings_sync", "List the appearance and chat settings another desktop would change here, without applying them.", readonly=True),
+    tool("apply_settings_preview", "Apply the reviewed settings using the preview's exact ID.", {"review": {"type": "string"}}),
     tool("chat_sync_status", "Show local configuration and the last sync result.", readonly=True),
     tool(
         "configure_chat_sync",
@@ -163,9 +182,13 @@ ACTIONS = {
     "open_mod_controls": controls.status,
     "mod_controls_status": controls.status,
     "preview_chat_sharing": outgoing.preview,
+    "preview_incoming_chats": incoming.preview,
     "mod_controls_sync": controls.sync_now,
     "check_sync_folder": integrity.inspect_folder,
     "repair_sync_folder": lambda: integrity.inspect_folder(repair=True),
+    "compact_sync_folder": maintenance.compact,
+    "list_sync_devices": maintenance.devices,
+    "retire_sync_device": maintenance.retire,
     "set_sync_paused": sync.set_paused,
     "sidebar_batch_chat_choices": hierarchy.group_chats,
     "sidebar_batch": hierarchy.group_batch,
@@ -187,7 +210,12 @@ ACTIONS = {
     "set_pin_order_sync": lambda enabled: sync.set_exchange_option("order", enabled),
     "chat_sync_status": sync.status,
     "set_settings_sync": lambda enabled: sync.set_exchange_option("settings", enabled),
+    "set_marks_sync": lambda enabled: sync.set_exchange_option("marks", enabled),
+    "set_archive_sync": lambda enabled: sync.set_exchange_option("archive", enabled),
+    "set_folder_encryption": sync.set_encryption,
     "sync_settings_now": sync.sync_settings_now,
+    "preview_settings_sync": lambda: sync.sync_settings_now("preview"),
+    "apply_settings_preview": lambda review: sync.sync_settings_now("apply", review),
     "configure_chat_sync": sync.setup,
     "sync_chats": sync.run,
     "sync_colours_now": sync.sync_colours_now,

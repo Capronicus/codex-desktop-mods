@@ -97,3 +97,28 @@ The plugin creates `codex-chat-sync-v1` inside your chosen folder. Each desktop 
 The [cross-platform workflow](../../.github/workflows/chat-sync.yml) installs the plugin in disposable profiles and sends a synthetic chat from Linux to the Windows Store app server and back. It also sends a separate Windows chat to Linux and checks the original chat ID, saved title, both replies and busy-chat deferral. GitHub artifacts carry the test folder. The test does not use a live Nextcloud, OneDrive or Google Drive account.
 
 To repeat the tests with disposable profiles, run `python3 tests/roundtrip.py` (Codex CLI and Node required) and `python3 tests/storage.py` (zstd required).
+
+## Preview what a sync would receive
+
+Ask **“What would a sync bring in?”** to list the chats another desktop would add or extend here, along with conflicts and chats a rule holds back. Nothing is transferred. The first appearance and chat settings a desktop receives also wait: **Mod Controls → Settings changes** shows each setting with its current and incoming value before you apply them. Later changes from the same desktops apply on their own.
+
+## Bookmarks, saved views, text animations and archived chats
+
+Two more sync switches in **Mod Controls** are off by default. **Bookmarks, saved views and text animations** shares those items for the signed-in account. Each item is one record, the newest edit wins, and an item deleted on one desktop is deleted on the others. **Archived chats** archives or restores a chat here when another desktop archives or restores it. Deleting a chat is never propagated.
+
+## Encrypt chat histories in the folder
+
+Switch on **Encrypt chat histories in the folder** to seal the chat histories and titles this desktop uploads. The first desktop creates `chat-sync/vault.key` in its Codex profile. Copy that file to the same place on each other desktop, for example with a USB stick or a password manager, then switch encryption on there. The key never enters the sync folder. Existing chats are uploaded again in sealed form on the next sync, and compacting the folder later removes the readable copies.
+
+- A desktop without the key leaves encrypted chats untouched and reports them as waiting.
+- Device names, project and section names, colours, settings, handoff notes and synced bookmarks stay readable in the folder.
+- Losing every copy of the key makes the folder copies unreadable. The chats on each desktop are unaffected.
+- The sealing uses SHAKE-256 as a keyed stream and HMAC-SHA-256 for integrity, from Python's standard library. It has not been independently reviewed.
+
+## Keep the folder small and remove old desktops
+
+Ask **“Compact the sync folder”** for a preview of the space held by superseded chat revisions and blocks no desktop points to. Applying it removes only items older than a week, and keeps everything while any desktop’s latest revision is still arriving.
+
+Ask **“Retire my old laptop from chat sync”** to remove a desktop that no longer syncs. The preview counts the chats only that desktop holds and the chats whose history differs from every other copy. Those leave the folder with it. Its chat heads, receipt and handoffs are removed. A desktop that is still in use simply publishes them again on its next sync.
+
+Compressed chats need Python 3.14, the `zstandard` package (`python3 -m pip install zstandard`) or the `zstd` program.

@@ -69,9 +69,30 @@
   }
 
   function newTranscript() {
-    return {turns:new Map(), current:null, total:null, pos:0, partial:Buffer.alloc(0), skipping:false};
+    return {turns:new Map(), current:null, total:null, usage:null, pos:0, partial:Buffer.alloc(0), skipping:false};
   }
   function count(n) { return Number.isSafeInteger(n) && n >= 0 ? n : null; }
+  // The breakdown is optional detail. Older records carry only the total.
+  const usageFields = {input:'input_tokens', cached:'cached_input_tokens', output:'output_tokens', reasoning:'reasoning_output_tokens'};
+  function parts(usage) {
+    const result = {};
+    for (const [name,field] of Object.entries(usageFields)) {
+      const n = count(usage?.[field]);
+      if (n != null) result[name] = n;
+      else if (name === 'input' || name === 'output') return null;
+    }
+    return result;
+  }
+  function combine(a, b, sign) {
+    if (!a || !b) return null;
+    const result = {};
+    for (const name of Object.keys(a)) {
+      if (b[name] == null) continue;
+      result[name] = a[name] + sign * b[name];
+      if (result[name] < 0) return null;
+    }
+    return 'input' in result && 'output' in result ? result : null;
+  }
   function record(s, line) {
     // Rollouts can contain very large tool results. Most records are unrelated
     // to timings or usage and need no JSON parsing on the desktop main thread.
@@ -86,9 +107,10 @@
       const tokens=count(p.turn_token_usage?.total_tokens), total=count(p.thread_token_usage?.total_tokens);
       if (tokens!=null && total!=null) {
         const turn=s.turns.get(p.turn_id)??{};
-        Object.assign(turn,{tokens,total,exact:true,unknownDelta:false});
+        Object.assign(turn,{tokens,total,exact:true,unknownDelta:false,parts:parts(p.turn_token_usage),unknownParts:false});
         s.turns.set(p.turn_id,turn);
         s.total=total;
+        s.usage=parts(p.thread_token_usage);
       }
       return;
     }
@@ -105,11 +127,17 @@
       const last = count(p.info?.last_token_usage?.total_tokens);
       // 'last' describes one model call. A turn can make many. Differences of
       // successive cumulative snapshots also avoid counting repeated events.
-      const delta = s.total != null && s.total <= total ? total - s.total : last;
+      const cumulative = s.total != null && s.total <= total;
+      const delta = cumulative ? total - s.total : last;
+      const usage = parts(p.info?.total_token_usage);
+      const split = cumulative ? combine(usage, s.usage, -1) : parts(p.info?.last_token_usage);
       s.total = total;
+      s.usage = usage;
       if (turn && !turn.exact) {
         if (delta == null) turn.unknownDelta = true;
         if (delta != null && !turn.unknownDelta) turn.tokens = (turn.tokens ?? 0) + delta;
+        if (!split) turn.unknownParts = true;
+        else if (!turn.unknownParts) turn.parts = turn.parts ? combine(turn.parts, split, 1) : split;
         turn.total = total;
       }
     } else if (turn && Number.isFinite(at)) {
@@ -426,6 +454,28 @@
     }
     await saveAction('desktop-performance.json',value);
   });
+  // Saved views and text animations live in the window's storage. With marks sync on,
+  // the window hands over a snapshot and receives what other desktops changed.
+  ipcMain.handle('local-marks:exchange', async (event, payload) => {
+    if (!primaryFrame(event)) throw Error('Unavailable sidebar.');
+    let cfg;
+    try { cfg = JSON.parse(await fs.readFile(path.join(actionDir,'config.json'),'utf8')); } catch { return {enabled:false}; }
+    if (!cfg?.marks) return {enabled:false};
+    const account = require('node:crypto').createHash('sha256').update(colourAccount()).digest('hex');
+    const instructions = path.join(actionDir,'renderer-marks-apply.json');
+    let pending = null;
+    try { pending = JSON.parse(await fs.readFile(instructions,'utf8')); } catch { /* Nothing was received. */ }
+    if (pending?.account !== account || typeof pending.id !== 'string') pending = null;
+    if (pending && payload?.applied === pending.id) { await fs.unlink(instructions).catch(()=>{}); pending = null; }
+    if (payload?.account === account && payload.views && typeof payload.views === 'object' && Array.isArray(payload.words)) {
+      const views = {};
+      for (const [id,view] of Object.entries(payload.views).slice(0,500))
+        if (idPattern.test(id) && view && typeof view === 'object' && JSON.stringify(view).length <= 2048) views[id] = view;
+      const words = payload.words.filter(tag => typeof tag === 'string' && tag.length <= 2048).slice(0,5000);
+      await saveAction('renderer-marks.json', {account, views, words, at:Date.now()});
+    }
+    return {enabled:true, account, apply:pending};
+  });
   const clients=new Set();
   ipcMain.on?.('local-sidebar:groups', event => {
     const parents = {}, projectKeys = {};
@@ -462,7 +512,8 @@
     try {
       await fs.rename(command,claimed);
       const doc=JSON.parse(await fs.readFile(claimed,'utf8'));
-      if(Date.now()-doc.at>=0 && Date.now()-doc.at<60000 && (doc.action==='measure' || (doc.action==='bookmark' && doc.account===colourAccount() && idPattern.test(doc.thread) && typeof doc.anchor==='string' && doc.anchor.length<=2048) ||
+      if(Date.now()-doc.at>=0 && Date.now()-doc.at<60000 && (doc.action==='measure' ||
+          (doc.action==='handoffs' && Number.isSafeInteger(doc.count) && doc.count>0 && doc.count<1000) || (doc.action==='bookmark' && doc.account===colourAccount() && idPattern.test(doc.thread) && typeof doc.anchor==='string' && doc.anchor.length<=2048) ||
           (doc.action==='navigate' && idPattern.test(doc.thread) && (!doc.turn || idPattern.test(doc.turn)))))
         {
           if (doc.action === 'bookmark' && doc.cloud)
@@ -535,7 +586,8 @@
     const result={};
     for(const key of turns) {
       const t=s.data?.turns.get(key);
-      if(t) result[key]={start:t.start,reply:t.reply??t.end,end:t.end,tokens:t.unknownDelta?null:t.tokens,total:t.total};
+      if(t) result[key]={start:t.start,reply:t.reply??t.end,end:t.end,tokens:t.unknownDelta?null:t.tokens,total:t.total,
+        ...(t.parts && !t.unknownParts && !t.unknownDelta ? {parts:t.parts} : {})};
     }
     return result;
   });

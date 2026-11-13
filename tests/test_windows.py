@@ -4,6 +4,8 @@ from pathlib import Path
 import struct
 import sys
 import tempfile
+import time
+import types
 import unittest
 from unittest.mock import patch
 
@@ -97,6 +99,72 @@ class WindowsModsTests(unittest.TestCase):
             self.assertTrue(mods.prune(self.cache, second))
         self.assertFalse(first.exists())
         self.assertTrue(second.exists())
+
+    def test_interrupted_staging_is_removed(self):
+        stale = self.cache / 'runtimes' / 'tmpabcd1234' / 'app'
+        stale.mkdir(parents=True)
+        (stale / mods.EXE).write_bytes(b'partial')
+        with patch.object(mods, 'running_copy', return_value=False):
+            self.assertTrue(mods.prune(self.cache))
+        self.assertFalse(stale.parent.exists())
+
+    def test_rebuild_shows_progress_and_keeps_its_result(self):
+        shown = []
+
+        class Window:
+            def __init__(self):
+                self.pending, self.open = [], True
+                shown.append(self)
+            def after(self, _delay, callback): self.pending.append(callback)
+            def destroy(self): self.open = False
+            def mainloop(self):
+                while self.open and self.pending:
+                    time.sleep(0.01)
+                    self.pending.pop(0)()
+            def title(self, *_): pass
+            def resizable(self, *_): pass
+            def protocol(self, *_): pass
+
+        class Widget:
+            def __init__(self, *_, **__): pass
+            def pack(self, **_): pass
+            def start(self, *_): pass
+
+        tk = types.ModuleType('tkinter')
+        tk.Tk, tk.TclError = Window, RuntimeError
+        tk.ttk = types.SimpleNamespace(Label=Widget, Progressbar=Widget)
+
+        def slow():
+            time.sleep(0.05)
+            return 'built'
+
+        def broken():
+            raise ValueError('disk full')
+
+        with patch.dict(sys.modules, {'tkinter': tk, 'tkinter.ttk': tk.ttk}):
+            self.assertEqual(mods.with_progress(slow), 'built')
+            self.assertEqual((len(shown), shown[0].open), (1, False))
+            with self.assertRaisesRegex(ValueError, 'disk full'):
+                mods.with_progress(broken)
+            # A display that cannot open must not stop the rebuild.
+            tk.Tk = lambda: (_ for _ in ()).throw(RuntimeError('no display'))
+            self.assertEqual(mods.with_progress(slow), 'built')
+        with patch.dict(sys.modules, {'tkinter': None}):
+            self.assertEqual(mods.with_progress(slow), 'built')
+
+        # Only a launch that has to rebuild shows the window.
+        calls = []
+        with patch.object(mods, 'locked') as locked, patch.object(mods, 'package', return_value=(self.app, '1')), \
+             patch.object(mods, 'runtime', side_effect=lambda *a: self.cache / 'runtimes' / 'x') as build, \
+             patch.object(mods, 'with_progress', side_effect=lambda task: calls.append('progress') or task()), \
+             patch.object(mods, 'prune_unused'), patch.object(mods, 'start_packaged') as start:
+            locked.return_value.__enter__.return_value = self.cache
+            mods.launch()
+            complete = self.cache / 'runtimes' / mods.revision(self.app, '1', mods.tool_version()) / '.complete'
+            complete.parent.mkdir(parents=True)
+            complete.touch()
+            mods.launch()
+        self.assertEqual((calls, build.call_count, start.call_count), (['progress'], 2, 2))
 
     def test_mismatched_binding_does_not_activate(self):
         wrong = self.executable.read_bytes().replace(mods.asar_hash(self.app/mods.ASAR).encode(), b'0'*64)

@@ -57,15 +57,17 @@ def status():
         "deviceEmoji": cfg.get("device_emoji", ""),
         "folder": folder, "available": bool(folder and (Path(folder) / "codex-chat-sync-v1").is_dir()),
         "paused": bool(cfg.get("paused")), "automatic": bool(cfg.get("automatic")),
-        "options": {k: bool(cfg.get(k)) for k in ("colours", "settings", "sidebar", "order", "tree")},
+        "options": {k: bool(cfg.get(k)) for k in ("colours", "settings", "sidebar", "order", "tree", "marks", "archive", "encrypted")},
         "health": health, "receipts": counts, "peers": list(peers.values()),
         "integrity": sync.last_folder_check(cfg),
         "sidebarReview": {
             "undoBatch": journal.get("id"),
             "lastApplied": journal.get("updated_at"),
+            "undoError": journal.get("error"),
             "queued": ("undo" if queue.get("undo") else "apply") if queue else None,
             "required": bool(cfg.get("sidebar") and (sync.STATE / "sidebar-preview.json").is_file()),
         },
+        "settingsReview": bool(cfg.get("settings") and (sync.STATE / "settings-preview.json").is_file()),
         "privateChats": rules.get("private_chats", []), "privateProjects": rules.get("private_projects", []),
         "visuals": visuals(),
     }

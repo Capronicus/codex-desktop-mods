@@ -91,6 +91,11 @@ class ChatActions(unittest.TestCase):
 
     def test_handoff(self):
         nonce=ident()
+        with self.on(self.home) as h:
+            cfg,vault=projects.config()
+            command=h/"chat-sync"/"desktop-command.json"
+            # The first pass records the inbox. Nothing has arrived yet.
+            self.assertEqual((actions.announce(cfg,vault),command.exists()),(0,False))
         with self.on(self.work):
             for _ in range(2):
                 actions.handoff(self.thread,self.turn,self.home,nonce,"Test this","assistant-reply")
@@ -99,6 +104,13 @@ class ChatActions(unittest.TestCase):
             projects.set_private("chat",self.thread,True)
             with self.assertRaises(ValueError):actions.handoff(self.thread,self.turn,self.home,ident())
         with self.on(self.home):
+            self.assertEqual(actions.announce(cfg,vault),1)
+            notice=sync.read_json(command)
+            self.assertEqual((notice["action"],notice["count"]),("handoffs",1))
+            command.unlink()
+            # One notice per arrival, and none for a chat kept on this desktop.
+            self.assertEqual((actions.announce(cfg,vault),command.exists()),(0,False))
+            self.assertEqual(actions.announce(cfg,vault,{self.thread}),0)
             msg,=actions.inbox()
             self.assertEqual(msg["note"],"Test this")
             self.assertEqual(actions.reply(msg["thread"],msg["turn"],msg["item"])["text"],"Shared answer")
@@ -145,6 +157,27 @@ class ChatActions(unittest.TestCase):
                 self.assertEqual(actions.compare_handoff_file(self.work,request)["status"],status)
             projects.set_private("chat",self.thread,True)
             with self.assertRaises(ValueError): actions.compare_handoff_file(self.work,request)
+
+    def test_handoff_file_ignores_checkout_line_endings(self):
+        request=ident()
+        with self.on(self.work) as h:
+            file=h/"checkout"/"notes.md"
+            file.write_bytes(b"first\nsecond\n")
+            actions.handoff(self.thread,self.turn,self.home,request,reference=str(file))
+        with self.on(self.home) as h:
+            file=h/"checkout"/"notes.md"
+            for contents,status in [(b"first\r\nsecond\r\n","Same version"),(b"first\r\nedited\r\n","Changed here")]:
+                file.write_bytes(contents)
+                self.assertEqual(actions.compare_handoff_file(self.work,request)["status"],status)
+            # A line ending can straddle two read blocks. Binary files compare byte for byte.
+            size=1024*1024-1
+            file.write_bytes(b"x"*size+b"\r\ny")
+            crlf=actions.fingerprint(file)
+            file.write_bytes(b"x"*size+b"\ny")
+            self.assertEqual(crlf[1],actions.fingerprint(file)[1])
+            self.assertNotEqual(crlf[0],actions.fingerprint(file)[0])
+            file.write_bytes(b"\0\r\n")
+            self.assertIsNone(actions.fingerprint(file)[1])
 
     def test_both_rule_scopes_and_resume(self):
         with self.on(self.work) as h:

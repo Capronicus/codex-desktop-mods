@@ -4,6 +4,7 @@ from contextlib import closing, contextmanager
 from datetime import datetime
 import gzip
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -141,6 +142,9 @@ def status():
         "sidebar": bool(cfg and cfg.get("sidebar")),
         "order": bool(cfg and cfg.get("order")),
         "tree": bool(cfg and cfg.get("tree")),
+        "marks": bool(cfg and cfg.get("marks")),
+        "archive": bool(cfg and cfg.get("archive")),
+        "encrypted": bool(cfg and cfg.get("encrypted")),
         "device_name": cfg and cfg.get("device_name"),
         "device_emoji": cfg and cfg.get("device_emoji", ""),
         "sidebar_preview": {k: preview[k] for k in ("id", "counts") if k in preview} or None,
@@ -159,7 +163,7 @@ def last_folder_check(cfg):
 
 
 def set_exchange_option(option, enabled):
-    if option not in ("colours", "sidebar", "order", "settings", "tree") or type(enabled) is not bool:
+    if option not in ("colours", "sidebar", "order", "settings", "tree", "marks", "archive") or type(enabled) is not bool:
         raise ValueError("Unknown sync option")
     with lock(STATE / "sync.lock"):
         cfg = read_json(CONFIG)
@@ -169,6 +173,11 @@ def set_exchange_option(option, enabled):
             raise ValueError("Enable sidebar sync before sharing sidebar layout.")
         if option == "sidebar" and not enabled:
             cfg["order"] = cfg["tree"] = False
+        if option == "settings" and not enabled:
+            (STATE / "settings-preview.json").unlink(missing_ok=True)
+        if option == "marks" and not enabled:
+            for name in ("renderer-marks.json", "renderer-marks-apply.json"):
+                (STATE / name).unlink(missing_ok=True)
         if option in ("sidebar", "order","tree") and not enabled:
             queue = STATE / "sidebar-layout-pending.json"
             pending = read_json(queue, {})
@@ -184,18 +193,45 @@ def set_exchange_option(option, enabled):
     return status()
 
 
-def sync_settings_now():
+def set_encryption(enabled):
+    """Encrypt chat histories and titles this desktop uploads from now on."""
+    import vault_crypto
+
+    if type(enabled) is not bool:
+        raise ValueError("Choose whether to encrypt chat histories.")
+    with lock(STATE / "sync.lock"):
+        cfg = read_json(CONFIG)
+        if not cfg:
+            raise ValueError("Choose a private chat sync folder first.")
+        created = False
+        if enabled:
+            if vault_crypto.stored_key() is None:
+                vault_crypto.create_key()
+                created = True
+            # Every chat is published again in its encrypted form on the next pass.
+            state_path = STATE / ("state-" + cfg["device"] + ".json")
+            state = read_json(state_path, {})
+            for row in state.values():
+                row.pop("token", None)
+            atomic(state_path, encode(state))
+        cfg["encrypted"] = enabled
+        atomic(CONFIG, encode(cfg))
+    return {"encrypted": enabled, "key_file": str(vault_crypto.key_file()), "key_created": created}
+
+
+def sync_settings_now(action="sync", approval=""):
     import settings
     import projects
 
     with lock(STATE / "sync.lock"):
         cfg, vault = projects.config()
-        require_active(cfg)
+        if action != "preview":
+            require_active(cfg)
         if not cfg.get("settings"):
             raise ValueError("Enable appearance and chat settings sync on this desktop first.")
         if not vault.is_dir():
             raise ValueError("Sync folder unavailable. Check the mount or desktop sync client.")
-        return settings.exchange(HOME, vault, cfg["device"])
+        return settings.exchange(HOME, vault, cfg["device"], action, approval)
 
 
 def sync_colours_now():
@@ -225,7 +261,7 @@ def disable():
             saved["exclusions"] = {k: cfg.get(k, []) for k in ("private_chats", "private_projects", "private_folders")}
             atomic(STATE / "disconnected.json", encode(saved))
         CONFIG.unlink(missing_ok=True)
-        for name in ("sidebar-layout-pending.json", "sidebar-preview.json", "last.json"):
+        for name in ("sidebar-layout-pending.json", "sidebar-preview.json", "settings-preview.json", "last.json"):
             (STATE / name).unlink(missing_ok=True)
     return {"configured": False}
 
@@ -299,14 +335,32 @@ def open_rollout(path):
     try:
         from compression import zstd
     except ImportError:
+        try:
+            import zstandard
+        except ImportError:
+            zstandard = None
+        if zstandard:
+            # The optional package needs no separate program, which Windows lacks by default.
+            try:
+                with path.open("rb") as raw, zstandard.ZstdDecompressor().stream_reader(raw) as reader:
+                    yield io.BufferedReader(reader)
+            except zstandard.ZstdError as exc:
+                raise ValueError("Could not unpack the compressed conversation.") from exc
+            return
         if not shutil.which("zstd"):
-            raise ValueError("Compressed chat needs Python 3.14+ or the zstd executable.")
+            raise ValueError("Compressed chat needs Python 3.14+, the zstandard package or the zstd executable.")
         proc = subprocess.Popen(["zstd", "-qdc", "--", str(path)], stdout=subprocess.PIPE)
+        drained = False
         try:
             yield proc.stdout
+            # A reader may stop after the header or one reply. Only a stream read
+            # to its end can report that the archive itself was unreadable.
+            drained = not proc.stdout.read(1)
         finally:
             proc.stdout.close()
-            if proc.wait():
+            if not drained:
+                proc.kill()
+            if proc.wait() and drained:
                 raise ValueError("Could not unpack the compressed conversation.")
     else:
         try:
@@ -322,18 +376,54 @@ def block_path(vault, key):
     return vault / "blocks" / key[:2] / (key + ".gz")
 
 
+def block_file(vault, key):
+    """The stored file of a block: its encrypted form when present, otherwise the plain one."""
+    plain = block_path(vault, key)
+    secret = plain.with_suffix(".enc")
+    return secret if secret.exists() else plain
+
+
+def block_form(key, data, secret=None):
+    """Return the suffix and bytes that store data under this name, or None for another block."""
+    import vault_crypto
+
+    packed = gzip.compress(data, compresslevel=3, mtime=0)
+    if digest(data) == key:
+        return ".gz", packed
+    secret = secret or vault_crypto.stored_key()
+    if secret and vault_crypto.block_name(secret, data) == key:
+        return ".enc", vault_crypto.seal(secret, b"block:" + bytes.fromhex(key), packed)
+    return None
+
+
 def put_block(vault, data):
-    key = digest(data)
-    dest = block_path(vault, key)
+    import vault_crypto
+
+    secret = vault_crypto.writing_key()
+    key = vault_crypto.block_name(secret, data) if secret else digest(data)
+    suffix, stored = block_form(key, data, secret)
+    dest = block_path(vault, key).with_suffix(suffix)
     if not dest.exists():
-        atomic(dest, gzip.compress(data, compresslevel=3, mtime=0))
+        atomic(dest, stored)
     return key
 
 
 def block_data(vault, key):
-    path = block_path(vault, key)
+    path = block_file(vault, key)
     if path.stat().st_size > BLOCK + 65536:
         raise ValueError("Oversized block")
+    if path.suffix == ".enc":
+        import vault_crypto
+
+        secret = vault_crypto.stored_key()
+        packed = vault_crypto.unseal(secret, b"block:" + bytes.fromhex(key), path.read_bytes())
+        try:
+            data = zlib.decompressobj(wbits=31).decompress(packed, BLOCK + 1)
+        except zlib.error as exc:
+            raise ValueError("Unreadable compressed block") from exc
+        if len(data) > BLOCK or vault_crypto.block_name(secret, data) != key:
+            raise ValueError("Block checksum mismatch")
+        return data
     try:
         with gzip.open(path, "rb") as stream:
             data = stream.read(BLOCK + 1)
@@ -463,7 +553,31 @@ def valid_manifest(man, tid):
         or not isinstance(clock[1], str)
     ):
         raise ValueError("Invalid name revision")
+    filed = man.get("archive_clock", [0, ""])
+    if (
+        not isinstance(filed, list)
+        or len(filed) != 2
+        or type(filed[0]) != int
+        or filed[0] < 0
+        or not isinstance(filed[1], str)
+    ):
+        raise ValueError("Invalid archive revision")
     return man
+
+
+def archive_change(copies, mine):
+    """Return [revision, archived] when another desktop filed this chat differently and later."""
+    newest = max(
+        (m for m in copies.values() if m.get("archive_clock")),
+        key=lambda m: tuple(m["archive_clock"]),
+        default=None,
+    )
+    if not newest or tuple(newest["archive_clock"]) <= tuple(mine.get("archive_clock", [0, ""])):
+        return None
+    if newest["archived"] == mine["archived"]:
+        mine["archive_clock"] = newest["archive_clock"]
+        return None
+    return [newest["archive_clock"], newest["archived"]]
 
 
 def is_prefix(vault, a, b):
@@ -505,7 +619,9 @@ def conversation_records(vault, man):
 def latest_history(vault, choices, local):
     best = max(choices, key=lambda m: m["size"])
     if all(is_prefix(vault, m, best) for m in choices):
-        return best, bool(local and local["chunks"] == best["chunks"])
+        # Equal histories can carry different block names while a folder is being encrypted.
+        return best, bool(local and (local["chunks"] == best["chunks"]
+                                     or (local["size"] == best["size"] and is_prefix(vault, local, best))))
     # Most passes finish above without decompressing a complete chat.
     histories = {tuple(m["chunks"]): None for m in choices}
     for m in choices:
@@ -519,6 +635,17 @@ def latest_history(vault, choices, local):
     return best, bool(local and histories[tuple(local["chunks"])] == longest)
 
 
+def read_version(vault, tid, revision):
+    import vault_crypto
+
+    data = (vault / "versions" / tid / (revision + ".json")).read_bytes()
+    if vault_crypto.sealed(data):
+        data = vault_crypto.unseal(vault_crypto.stored_key(), b"revision:" + bytes.fromhex(revision), data)
+    if digest(data) != revision:
+        raise ValueError("Invalid snapshot checksum")
+    return valid_manifest(json.loads(data), tid)
+
+
 def shared_heads(vault, skipped):
     result = {}
     for path in (vault / "heads").glob("*/*.json"):
@@ -529,11 +656,7 @@ def shared_heads(vault, skipped):
             revision = read_json(path)
             if not isinstance(revision, str) or not HEX.fullmatch(revision):
                 raise ValueError("Invalid device head")
-            data = (vault / "versions" / tid / (revision + ".json")).read_bytes()
-            if digest(data) != revision:
-                raise ValueError("Invalid snapshot checksum")
-            man = valid_manifest(json.loads(data), tid)
-            result.setdefault(tid, {})[path.parent.name] = man
+            result.setdefault(tid, {})[path.parent.name] = read_version(vault, tid, revision)
         except (OSError, ValueError, TypeError) as exc:
             skipped[tid] = "Waiting for a complete device snapshot: " + str(exc)
     return result
@@ -544,7 +667,10 @@ def publish(vault, device, man):
     key = digest(data)
     path = vault / "versions" / man["id"] / (key + ".json")
     if not path.exists():
-        atomic(path, data)
+        import vault_crypto
+
+        secret = vault_crypto.writing_key()
+        atomic(path, vault_crypto.seal(secret, b"revision:" + bytes.fromhex(key), data) if secret else data)
     head = vault / "heads" / device / (man["id"] + ".json")
     if read_json(head) != key:
         atomic(head, encode(key))
@@ -602,7 +728,8 @@ def recover_projections():
         if UUID.fullmatch(journal.name):
             try:
                 recover_projection(journal)
-            except Busy:
+            except (Busy, OSError, ValueError, sqlite3.Error):
+                # Only this chat waits for its timeline. Other chats keep syncing.
                 busy.add(journal.name)
     return busy
 
@@ -663,8 +790,14 @@ def materialize(vault, man, local, cwd=None, checkout=None):
                     try:
                         from compression import zstd
                     except ImportError:
-                        with open(compressed, "wb") as out:
-                            subprocess.run(["zstd", "-q", "-c", "--", tmp], stdout=out, check=True)
+                        try:
+                            import zstandard
+                        except ImportError:
+                            with open(compressed, "wb") as out:
+                                subprocess.run(["zstd", "-q", "-c", "--", tmp], stdout=out, check=True)
+                        else:
+                            with open(tmp, "rb") as raw, open(compressed, "wb") as out:
+                                zstandard.ZstdCompressor().copy_stream(raw, out)
                     else:
                         with open(tmp, "rb") as raw, zstd.open(compressed, "wb") as out:
                             shutil.copyfileobj(raw, out)
@@ -791,6 +924,18 @@ def run(automatic=False):
                     if name and name != previous.get("name"):
                         clock = [clock[0] + 1, device]
                     snap["manifest"]["name_clock"] = clock
+                    # Archiving here is a revision of its own. A change received from
+                    # another desktop keeps that desktop's revision once it is applied.
+                    filed, queued = previous.get("archive_clock"), prev.get("pending_archive")
+                    if queued and queued[1] == snap["manifest"]["archived"]:
+                        filed = queued[0]
+                        snap.pop("pending_archive", None)
+                    elif queued:
+                        snap["pending_archive"] = queued
+                    elif cfg.get("archive") and previous and previous.get("archived") != snap["manifest"]["archived"]:
+                        filed = [(filed or [0, ""])[0] + 1, device]
+                    if filed:
+                        snap["manifest"]["archive_clock"] = filed
                     pending = prev.get("pending_name")
                     if pending:
                         snap["pending_name"] = pending
@@ -845,6 +990,10 @@ def run(automatic=False):
                     checkouts[tid] = checkout
                 if up_to_date:
                     accepted.add(tid)
+                    if cfg.get("archive"):
+                        move = archive_change(copies, current)
+                        if move:
+                            state[tid]["pending_archive"] = move
                     if latest_name and best["name_clock"] > current.get("name_clock", [0, ""]):
                         state[tid]["manifest"] = {
                             **current,
@@ -860,7 +1009,18 @@ def run(automatic=False):
                     checkouts[tid] = checkout
                 imported_ids.add(tid)
                 # Carry the name until the native app server indexes the rollout.
-                state[tid] = {"manifest": best, "pending_name": best.get("name")}
+                stored = best
+                if current:
+                    # The file stays where it was filed here. Only its history was replaced.
+                    stored = {k: v for k, v in best.items() if k != "archive_clock"}
+                    stored["archived"] = current["archived"]
+                    if current.get("archive_clock"):
+                        stored["archive_clock"] = current["archive_clock"]
+                state[tid] = {"manifest": stored, "pending_name": best.get("name")}
+                if current and cfg.get("archive"):
+                    move = archive_change(copies, stored)
+                    if move:
+                        state[tid]["pending_archive"] = move
                 stats["updated" if current else "imported"] += 1
             except Busy:
                 busy.add(tid)
@@ -886,9 +1046,27 @@ def run(automatic=False):
         if pending:
             from native_names import apply_names
 
-            for tid in apply_names(pending, HOME):
+            try:
+                named = apply_names(pending, HOME)
+            except (OSError, sqlite3.Error):
+                named = []  # A busy catalogue keeps the names pending for the next pass.
+            for tid in named:
                 state[tid].pop("pending_name", None)
             atomic(state_path, encode(state))
+        if cfg.get("archive"):
+            moves = {
+                tid: s["pending_archive"][1]
+                for tid, s in state.items()
+                if s.get("pending_archive") and tid in local_files and tid not in private and tid not in busy
+            }
+            if moves:
+                from native_names import apply_archive
+
+                try:
+                    apply_archive(moves, HOME)
+                except (OSError, sqlite3.Error, subprocess.SubprocessError):
+                    pass  # The next pass sees where each file is and tries again.
+                stats["archive_moves"] = len(moves)
         stats["pending_names"] = sum(bool(s.get("pending_name")) for s in state.values())
         stats["unavailable_local"] = sum(
             tid not in local_files
@@ -907,6 +1085,13 @@ def run(automatic=False):
             set(snapshots) | imported_ids,
             origins,
         )
+        import chat_actions
+        try:
+            arrived = chat_actions.announce(cfg, vault, private)
+        except (OSError, ValueError):
+            arrived = 0  # The notice is a convenience. The inbox still lists the handoff.
+        if arrived:
+            stats["handoffs_received"] = arrived
         if cfg.get("sidebar"):
             import sidebar
 
@@ -946,6 +1131,15 @@ def run(automatic=False):
                 stats["settings"] = settings.exchange(HOME, vault, device)
             except (OSError, EOFError, ValueError, subprocess.SubprocessError) as exc:
                 stats["settings"] = {"error": str(exc)}
+        if cfg.get("marks"):
+            import marks
+
+            try:
+                stats["marks"] = marks.exchange(cfg, vault)
+            except Busy:
+                stats["marks"] = {"waiting_for_desktop": 1}  # A bookmark is being edited right now.
+            except (OSError, ValueError) as exc:
+                stats["marks"] = {"error": str(exc)}
         atomic(STATE / "last.json", encode(stats))
         return stats
 

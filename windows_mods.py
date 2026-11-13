@@ -15,6 +15,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 patcher = importlib.import_module('sidebar-colours')
@@ -25,6 +26,7 @@ MARKER = 'Capronicus Codex Desktop Mods launcher'
 EXE = 'ChatGPT.exe'
 ASAR = Path('resources') / 'app.asar'
 REV = re.compile(r'[0-9a-f]{64}')
+STAGING = re.compile(r'tmp[0-9a-z_]{8}')
 # Electron stores the ASAR header hash in the INTEGRITY/ELECTRONASAR PE resource.
 INTEGRITY = re.compile(rb'\[\{"file":"resources\\\\app\.asar","alg":"SHA256","value":"([0-9a-fA-F]{64})"\}\]')
 
@@ -235,6 +237,9 @@ def prune(root, keep=None):
         raise ValueError('Expected an ordinary runtime cache directory.')
     old = [p for p in directory.iterdir() if REV.fullmatch(p.name) and p != keep and cache_directory(p)]
     retired = [p for p in directory.glob('retired-*') if REV.fullmatch(p.name[8:]) and cache_directory(p)]
+    # An interrupted rebuild leaves its staging copy. Builds hold the install lock,
+    # so any staging directory seen here is finished with.
+    retired += [p for p in directory.glob('tmp*') if STAGING.fullmatch(p.name) and cache_directory(p)]
     if (old or retired) and running_copy(directory):
         return False
     done = True
@@ -306,6 +311,51 @@ def remove():
     return 'Removed the Windows mod launcher and cached app. Your chat profile is preserved.'
 
 
+def with_progress(task):
+    """Run a long rebuild beside a small window, so the first launch after an update is not silent."""
+    try:
+        import tkinter
+        from tkinter import ttk
+    except ImportError:
+        return task()
+    outcome = {}
+
+    def work():
+        try:
+            outcome['value'] = task()
+        except BaseException as exc:
+            outcome['error'] = exc
+
+    worker = threading.Thread(target=work, daemon=True)
+    worker.start()
+    # The window is a courtesy. Whatever happens to it, the rebuild decides the result.
+    try:
+        window = tkinter.Tk()
+        window.title('Codex Desktop Mods')
+        window.resizable(False, False)
+        window.protocol('WM_DELETE_WINDOW', lambda: None)
+        ttk.Label(window, padding=16, text='Preparing ChatGPT with your desktop mods.\n'
+                  'This runs once after each app update and can take a minute.').pack()
+        bar = ttk.Progressbar(window, mode='indeterminate', length=320)
+        bar.pack(padx=16, pady=(0, 16))
+        bar.start(12)
+
+        def poll():
+            if worker.is_alive():
+                window.after(200, poll)
+            else:
+                window.destroy()
+
+        window.after(200, poll)
+        window.mainloop()
+    except Exception:
+        pass
+    worker.join()
+    if 'error' in outcome:
+        raise outcome['error']
+    return outcome['value']
+
+
 def start_packaged(exe):
     # The app discovers the registered core, sandbox service and profile through
     # its MSIX identity. Keep that identity when starting the private copy.
@@ -323,10 +373,11 @@ def launch():
             pkg = package()
             if not pkg:
                 raise ValueError('The Windows ChatGPT package is unavailable.')
-            dest = runtime(*pkg, root)
+            ready = (root / 'runtimes' / revision(*pkg, tool_version()) / '.complete').is_file()
+            dest = runtime(*pkg, root) if ready else with_progress(lambda: runtime(*pkg, root))
             prune_unused(root, dest)
             start_packaged(dest / EXE)
-    except (OSError, ValueError, KeyError, struct.error, subprocess.SubprocessError) as exc:
+    except Exception as exc:  # Any failure to prepare the patched copy opens the stock app.
         import ctypes
         open_stock()
         ctypes.windll.user32.MessageBoxW(None, 'Opening the standard ChatGPT app.\n\n' + str(exc),

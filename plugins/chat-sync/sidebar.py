@@ -59,8 +59,8 @@ def catalogue(home, aliases, eligible, pending, layout):
         db.execute("BEGIN")
         native = {kind: {} for kind in GROUPS}
         for ident, name, metadata in db.execute("SELECT id,name,metadata FROM projects"):
-            meta = json.loads(metadata)
-            original = meta.get("codex.localProjectId")
+            meta = json.loads(metadata or "{}")
+            original = meta.get("codex.localProjectId") if isinstance(meta, dict) else None
             stable = project_aliases.get(ident, original if uid(original) else ident)
             if not uid(stable) or not valid_name(name):
                 continue
@@ -115,6 +115,8 @@ def exchange(
     cfg = cfg if cfg is not None else load(home / "chat-sync" / "config.json", {})
     queued = load(home / "chat-sync" / desktop_layout.QUEUE, {})
     if queued.get("undo"):
+        # Make sure a helper is waiting. An undo cannot stay queued indefinitely.
+        desktop_layout.start_worker(home)
         return {"undo_on_quit": True}
     ordering_on = bool(cfg.get("order"))
     links = projects.Links(

@@ -71,6 +71,7 @@ def begin(home, device, review, changes, native, pinned, rows):
     # Consecutive passes before quit form one visible batch.
     pending = (home / "chat-sync" / "sidebar-layout-pending.json").exists()
     undo = old if pending and old.get("device") == device else {"device": device, "native": {}}
+    undo.pop("error", None)
     targets = {k: v[1] for k, v in changes.items()}
     # Codex uses a single native section field for a custom section or a pin.
     # The renderer can display both independently. Journal the native placement as a pair.
@@ -238,6 +239,17 @@ def undo_locked(home, cfg):
     return {"undone": doc["id"], "sidebar": False}
 
 
+def undo_skipped(home, reason):
+    """Release a queued undo that could not finish. The journal stays for another attempt."""
+    import desktop_layout
+
+    directory = home / "chat-sync"
+    doc = sync.read_json(directory / JOURNAL, {})
+    if doc:
+        sync.atomic(directory / JOURNAL, sync.encode({**doc, "error": reason}))
+    (directory / desktop_layout.QUEUE).unlink(missing_ok=True)
+
+
 def undo(batch=None):
     import desktop_layout
     import projects
@@ -249,6 +261,8 @@ def undo(batch=None):
             raise ValueError("There is no sidebar batch to undo on this device.")
         if batch is not None and batch != doc.get("id"):
             raise ValueError("A newer sidebar batch is available. Refresh before undoing it.")
+        if doc.pop("error", None):
+            sync.atomic(sync.STATE / JOURNAL, sync.encode(doc))
         if desktop_layout.desktop_running():
             sync.atomic(
                 sync.STATE / desktop_layout.QUEUE,

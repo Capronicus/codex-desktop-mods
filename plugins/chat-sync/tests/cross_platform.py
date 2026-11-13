@@ -101,13 +101,25 @@ def settings_fixture(app, call, stage, vault, home):
         write({"appearanceTheme":"light", "pagesFontSize":16})
     assert call("chat_sync_status")["settings"] is False
     assert call("set_settings_sync", enabled=True)["settings"] is True
-    result = call("sync_settings_now")
-    assert not result["deferred_devices"] and not result["skipped_local"], result
     def desktop():
         layer = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
         assert layer["model"]=="offline-test"
         assert layer["desktop"]["audioOutputDeviceId"]==private_value
         return layer["desktop"]
+    result = call("sync_settings_now")
+    if stage != "seed":
+        # The first settings a desktop receives wait for review and leave its own values alone.
+        assert result.get("preview_required") and not result["deferred_devices"], result
+        assert desktop().get("appearanceTheme") != "dark"
+        assert call("mod_controls_status")["settingsReview"] is True
+        preview = call("preview_settings_sync")
+        incoming = {change["key"] for change in preview["changes"]}
+        assert preview["id"] == result["id"] and len(incoming) == result["changes"], (preview, result)
+        assert incoming >= {"appearanceTheme", "appearanceDarkChromeTheme", "composerEnterBehavior"}, preview
+        result = call("apply_settings_preview", review=preview["id"])
+        assert result["applied"] == len(incoming), result
+        assert call("mod_controls_status")["settingsReview"] is False
+    assert not result["deferred_devices"] and not result["skipped_local"], result
     local = desktop()
     assert local["appearanceTheme"]=="dark" and local["appearanceDarkChromeTheme"]==dark
     assert local["composerEnterBehavior"]=="cmdAlways"

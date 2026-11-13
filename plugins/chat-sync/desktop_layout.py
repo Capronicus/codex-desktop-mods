@@ -4,6 +4,7 @@ import csv
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import time
@@ -324,7 +325,13 @@ def apply_pending(home):
         if plan.get("batch_id") and plan["batch_id"] != sync.read_json(directory / batches.JOURNAL, {}).get("id"):
             path.unlink(missing_ok=True)
             return True
-        batches.undo_locked(home, cfg)
+        try:
+            batches.undo_locked(home, cfg)
+        except (ValueError, OSError, EOFError, sqlite3.Error, subprocess.SubprocessError) as error:
+            if desktop_running():
+                return False  # The desktop reopened. Try again after its next exit.
+            # A skipped undo must not keep sidebar sync waiting. Keep the reason for Mod Controls.
+            batches.undo_skipped(home, str(error))
         return True
     layout = Layout(home)
     if not layout.enabled or layout.account != plan["account"]:

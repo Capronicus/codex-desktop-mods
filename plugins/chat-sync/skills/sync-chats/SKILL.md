@@ -36,3 +36,15 @@ For project or folder exclusions, use Mod Controls → Chat actions and sharing.
 In version 0.15.0, open **Mod Controls → Organize projects and sections** to create a subsection under a project or custom section (up to three levels including the root), change its parent or convert between a custom section and a real local project. Apply queued changes by fully quitting and reopening the app. A converted project remembers its local folder paths.
 
 Use **Add to batch** in the organizer to preview a series of creations and moves before applying it on quit. Enable **Subsection tree** separately on both desktops to share nesting. File handoffs can include a relative path and fingerprint for comparison. Right-click a message or selection to bookmark it. Open bookmarks from the pet. Saved views in the sidebar filter local chats by project, origin, age and outstanding receipt. Bookmarks and saved views are local.
+
+To see what a sync would receive before running it, call `preview_incoming_chats`. It lists chats that would be added or extended, conflicts, chats held back by a rule and chats still waiting for files. Nothing is transferred.
+
+The first appearance and chat settings a desktop receives wait for review. When `sync_settings_now` or `sync_chats` reports `preview_required` for settings, call `preview_settings_sync`, show each setting with its current and incoming value, and call `apply_settings_preview` with the preview ID only after the user agrees.
+
+To free space in the sync folder, call `compact_sync_folder` without arguments, report the revisions, blocks and bytes it would remove, and call it again with `apply: true` if the user agrees. It keeps every revision a desktop currently points to and anything newer than a week.
+
+To remove a desktop that no longer syncs, call `list_sync_devices`, confirm the desktop with the user by name, and call `retire_sync_device` with its ID. Show the preview: `only_copy` counts chats no other desktop holds and `unmatched_history` counts chats whose history differs from every other copy. Both are lost from the folder if the desktop is retired. Call it again with the returned `review` ID only after the user confirms. Never retire the desktop in use; disconnect it instead.
+
+`set_marks_sync` exchanges the signed-in account's bookmarks, saved views and text animations. `set_archive_sync` archives or restores a chat here when another desktop archives or restores it. Both are off until the user asks.
+
+`set_folder_encryption` encrypts the chat histories and titles this desktop uploads. It returns `key_file`. Tell the user to copy that file to the same place in the profile of each other desktop and then enable encryption there. Never read, print or send the key file's contents. Device names, project and section names, colours, settings, handoff notes and synced bookmarks stay readable in the folder. A desktop without the key reports encrypted chats as waiting.
