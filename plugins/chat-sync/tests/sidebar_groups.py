@@ -68,6 +68,36 @@ class SidebarGroups(unittest.TestCase):
                         lay=apply("create",parent=key,name="References")
                         self.assertEqual(lay.sections[0]["name"],"References")
                         self.assertEqual(hierarchy.inventory()["parents"][lay.sections[0]["id"]],key)
+                        middle=lay.sections[0]["id"]
+                        lay=apply("create",parent="custom:"+middle,name="Seurat")
+                        leaf=next(s for s in lay.sections if s["name"]=="Seurat")
+                        deep="custom:"+leaf["id"]
+                        self.assertEqual(hierarchy.inventory()["parents"][leaf["id"]],"custom:"+middle)
+                        with self.assertRaisesRegex(ValueError,"three levels"):
+                            hierarchy.change("create",parent=deep,name="Too deep")
+                        with self.assertRaisesRegex(ValueError,"inside itself"):
+                            hierarchy.change("move",source=middle,parent=deep)
+                        with self.assertRaisesRegex(ValueError,"three levels"):
+                            hierarchy.change("demote",source=key,parent=parent)
+                        app.call("thread/section/move",{"threadId":tid,"sectionId":leaf["hostSectionIds"]["local"]})
+                        lay=apply("move",source=middle,parent=parent)
+                        row=app.call("thread/read",{"threadId":tid})["thread"]
+                        self.assertEqual(row["projectId"],parent)
+                        self.assertEqual(row["section"]["id"],leaf["hostSectionIds"]["local"])
+                        lay=apply("demote",source=parent)
+                        self.assertEqual(hierarchy.inventory()["parents"][middle],"custom:"+parent)
+                        row=app.call("thread/read",{"threadId":tid})["thread"]
+                        self.assertFalse(row["projectId"])
+                        self.assertEqual(row["section"]["id"],leaf["hostSectionIds"]["local"])
+                        lay=apply("promote",source=parent)
+                        self.assertEqual(hierarchy.inventory()["parents"][middle],parent)
+                        self.assertEqual(app.call("thread/read",{"threadId":tid})["thread"]["projectId"],lay.project_ids[parent])
+                        apply("move",source=leaf["id"],parent=key)
+                        lay=apply("move",source=leaf["id"],parent="custom:"+middle)
+                        self.assertEqual(app.call("thread/read",{"threadId":tid})["thread"]["projectId"],lay.project_ids[parent])
+                        lay=apply("promote",source=middle)
+                        self.assertEqual(hierarchy.inventory()["parents"][leaf["id"]],middle)
+                        self.assertEqual(app.call("thread/read",{"threadId":tid})["thread"]["projectId"],lay.project_ids[middle])
                         hierarchy.change("demote",source=key)
                         hierarchy.change("cancel")
                         self.assertFalse(hierarchy.inventory()["pending"])

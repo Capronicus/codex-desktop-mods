@@ -33,4 +33,4 @@ If a manual chat sync returns an `activation_offer`, show its destination and of
 
 For project or folder exclusions, use Mod Controls → Chat actions and sharing. Use `set_local_only` for this PC or `set_shared_exclusion` when the user chooses all connected PCs. Shared folder rules use a project-relative path. Existing copies remain. Right-click a local reply for file lookup or device handoff. The panel also compares two conflicting snapshots without changing either one.
 
-In version 0.13.0, open **Mod Controls → Organize projects and sections** to create a project subsection, change its parent or convert between a custom section and a real local project. Apply queued changes by fully quitting and reopening the app. A converted project remembers its local folder paths.
+In version 0.14.0, open **Mod Controls → Organize projects and sections** to create a subsection under a project or custom section (up to three levels including the root), change its parent or convert between a custom section and a real local project. Apply queued changes by fully quitting and reopening the app. A converted project remembers its local folder paths.

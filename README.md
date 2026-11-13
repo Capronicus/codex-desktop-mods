@@ -39,17 +39,21 @@ The six appearance switches work without connecting a folder.
 
 ## Project subsections and group conversions
 
-With **Codex Desktop Mods** and **Codex Chat Sync 0.13.0** installed on this desktop, right-click a local project or a custom section and choose **Organize project…** or **Organize section…**. The same controls are in **Mod Controls → Organize projects and sections**. These local actions work with chat sync disconnected.
+With **Codex Desktop Mods** and **Codex Chat Sync 0.14.0** installed on this desktop, right-click a local project or a custom section and choose **Organize project…** or **Organize section…**. The same controls are in **Mod Controls → Organize projects and sections**. These local actions work with chat sync disconnected.
 
-- Choose **Create subsection** to add a named group inside a project. The section follows the project's expand and collapse control. Use the usual section menu to add chats.
+- Choose **Create subsection** to add a named group inside a project or custom section. The sidebar supports three levels, such as **Studio › Design › References**. A subsection collapses with either parent. Use the usual section menu to add chats.
 - Choose **Convert section to project** to create a real local Codex project and move its local chats there. You can supply a folder. A previously demoted project restores its saved folder paths.
-- Choose **Convert project to section** and select **Top-level sections** or another local project. **Move section** also moves an existing section between those locations. Cloud items in a promoted mixed section stay together in a subsection.
+- Choose **Convert project to section** and select **Top-level sections**, a local project, or a custom section with room for the group and its children. **Move section** also moves an existing section between those locations. Cloud items in a promoted mixed section stay together in a subsection.
 
 Click **Save change**, fully quit the desktop (including its tray window), and reopen it. The conversion uses Codex's project and chat APIs. Parent placement and remembered folder paths are specific to this desktop.
 
+## Animated words in chat
+
+Select words in a chat message, right-click the selection, and choose **Animate selected text**. The selected occurrence gets a gently pulsing highlight. Select any part of it and choose **Remove text animation** to clear it. This works in local Codex and ChatGPT messages, including your own. The marks are saved on this desktop and leave the message and copied text intact. With reduced motion enabled, the highlight stays still.
+
 ## Files, reply handoffs and chat actions
 
-Update **Codex Desktop Mods** and **Codex Chat Sync** to **0.13.0** on both PCs, apply the desktop mods, then fully quit and reopen the app. Right-click a local assistant reply for **Open local copy** or **Hand off this reply**. Shift + right-click keeps the regular text menu. Right-click a local sidebar chat for **Chat branches** or a project for **Project sharing**.
+Update **Codex Desktop Mods** and **Codex Chat Sync** to **0.14.0** on both PCs, apply the desktop mods, then fully quit and reopen the app. Right-click a local assistant reply for **Open local copy** or **Hand off this reply**. Shift + right-click keeps the regular text menu. Right-click a local sidebar chat for **Chat branches** or a project for **Project sharing**.
 
 Open **Mod Controls → Chat actions and sharing** for the handoff inbox, conflict comparison, project or folder exclusions and the 12-second desktop responsiveness check. [Using chat actions on Home and Work](plugins/chat-sync/README.md#chat-actions-on-home-and-work)
 
@@ -150,4 +154,4 @@ node tests/chat-details.cjs
 python3 tests/updates.py
 ```
 
-With the Linux desktop app and Google Chrome installed, run `node tests/sidebar-colours.cjs` to check the rendered colours in both themes, `node tests/sections.cjs` for section inheritance and `node tests/chat-layout.cjs` to check chat width, panel clearance and scroll behaviour.
+With the Linux desktop app and Google Chrome installed, run `node tests/sidebar-colours.cjs` to check the rendered colours in both themes, `node tests/sections.cjs` for section inheritance and `node tests/chat-layout.cjs` to check chat width, panel clearance and scroll behaviour. Run `node tests/animated-words.cjs` to check the selected occurrence, persistence and reduced motion.

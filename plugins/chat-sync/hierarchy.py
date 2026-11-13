@@ -22,9 +22,51 @@ def group_state(layout):
     return layout.data.get(STORE, {}).get(layout.account, {})
 
 
+SECTION = "custom:"
+MAX_LEVELS = 3
+
+
+def placement(layout, action, source, parent):
+    """Return the owning project and descendant sections. Legacy project parents are bare IDs."""
+    sections = {SECTION + row["id"]: row for row in layout.sections if row["id"] != desktop.PINNED}
+    available = {key for key, project in layout.projects.items()
+                 if projects.valid_id(key) and not project.get("chatGptBacking")}
+    parents = {SECTION + key: value for key, value in group_state(layout).get("parents", {}).items()
+               if SECTION + key in sections}
+    root = source if action == "demote" else SECTION + source
+    children = {}
+    for node, owner in parents.items():
+        children.setdefault(owner, []).append(node)
+    descendants = {}
+    pending = [(root, 1)]
+    while pending:
+        node, height = pending.pop()
+        if node in descendants:
+            raise ValueError("A group cannot be placed inside itself or one of its subsections.")
+        descendants[node] = height
+        pending.extend((child, height + 1) for child in children.get(node, []))
+    owner = parent
+    ancestors = set()
+    while owner:
+        if owner in descendants or owner in ancestors:
+            raise ValueError("A group cannot be placed inside itself or one of its subsections.")
+        ancestors.add(owner)
+        if owner in available:
+            break
+        if owner not in sections:
+            raise ValueError("Choose an existing local project or custom section.")
+        owner = parents.get(owner, "")
+    if len(ancestors) + max(descendants.values()) > MAX_LEVELS:
+        raise ValueError("Groups can be three levels deep. Choose a higher parent or move a child first.")
+    if owner and any("codex:project:" + owner in sections[node].get("itemKeys", [])
+                     for node in descendants if node in sections):
+        raise ValueError("Move the parent project out of this section first.")
+    return owner, [node[len(SECTION):] for node in descendants if node != root]
+
+
 def inventory():
     layout = desktop.Layout(sync.HOME)
-    sections = {s["id"]: s["name"] for s in layout.sections}
+    sections = {s["id"]: s["name"] for s in layout.sections if s["id"] != desktop.PINNED}
     local = {i: p["name"] for i, p in layout.projects.items()
              if projects.valid_id(i) and not p.get("chatGptBacking")}
     job = sync.read_json(sync.STATE / QUEUE, {})
@@ -51,11 +93,12 @@ def change(action, source="", parent="", name="", folder=""):
                 raise ValueError("Finish the pending sidebar change first.")
         else:
             groups = inventory()
-            if parent and parent not in groups["projects"]:
-                raise ValueError("Choose a local parent project.")
+            if action == "promote" and parent:
+                raise ValueError("A local project must be at the top level.")
+            placement(layout, action, source, parent)
             if action == "create":
                 if not parent or not name.strip() or len(name.strip()) > 150:
-                    raise ValueError("Choose a project and enter a subsection name (up to 150 characters).")
+                    raise ValueError("Choose a parent and enter a subsection name (up to 150 characters).")
                 label = name.strip()
             elif action in ("promote", "move") and source in groups["sections"]:
                 label = groups["sections"][source]
@@ -153,10 +196,7 @@ def run_change(home, call):
     if not job.get("started"):
         section = next((s for s in sections if s["id"] == source), {})
         project = local.get(source, {})
-        if parent and (parent not in local or local[parent].get("chatGptBacking")):
-            raise ValueError("The selected parent project changed. Cancel and choose it again.")
-        if parent and "codex:project:"+parent in section.get("itemKeys", []):
-            raise ValueError("Move the parent project out of this section first.")
+        owner, nested = placement(layout, action, source, parent)
         if action == "demote" and (not project or project.get("chatGptBacking")) or action in ("move","promote") and not section:
             raise ValueError("This group changed. Cancel and select its current sidebar entry.")
         pid = project_id(source) if action == "demote" else None
@@ -170,32 +210,44 @@ def run_change(home, call):
         else:
             members = thread_members(home, "thread_section_id", sid)
             members.update(k[len(ITEM):] for k in section.get("itemKeys", []) if k.startswith(ITEM))
+        # A descendant keeps its own native section when the enclosing project changes.
+        nested_members = set()
+        for row in sections:
+            if row["id"] in nested:
+                native = row.get("hostSectionIds", {}).get("local") or (row["id"] if row["id"] in native_sections else None)
+                nested_members.update(thread_members(home, "thread_section_id", native))
+                nested_members.update(k[len(ITEM):] for k in row.get("itemKeys", []) if k.startswith(ITEM))
+        members.difference_update(nested_members)
         # Mixed sections keep their nonlocal members in a subsection of the new project.
         mixed = any(not k.startswith(ITEM) for k in section.get("itemKeys", [])) or any(k != "local" for k in section.get("hostSectionIds", {}))
         previous = retained.get(source, {}) if action == "promote" else {}
-        preserve_exclusions(home, members, source if action=="demote" else None)
+        preserve_exclusions(home, members | nested_members, source if action=="demote" else None)
         target = previous.get("stable") or source or str(uuid.uuid4())
-        if action == "promote" and target in local or action in ("create","demote") and any(s["id"] == target for s in sections):
+        if ((action == "promote" and (target in local or mixed and target == source))
+                or (action in ("create", "demote") and any(s["id"] == target for s in sections))):
             target = str(uuid.uuid4())
         old_sections = {k[len(ITEM):]: s["id"] for s in sections for k in s.get("itemKeys", [])
                         if k.startswith(ITEM) and k[len(ITEM):] in members}
-        save(started=True, members=sorted(members), oldProject=pid, oldSection=sid, target=target, mixed=mixed,
+        save(started=True, owner=owner, nestedMembers=sorted(nested_members), members=sorted(members), oldProject=pid, oldSection=sid, target=target, mixed=mixed,
              priorSections=old_sections if action == "demote" else previous.get("sections", {}),
-             children=[s for s,p in parents.items() if p==source] if action=="demote" else previous.get("children", []),
+             children=[s for s,p in parents.items() if p == (source if action == "demote" else SECTION + source)],
+             legacyChildren=previous.get("children", []) if action == "promote" else [],
              original=project if action == "demote" else previous.get("record", {}),
              nativeRecord=native_projects.get(pid, {}) if action == "demote" else previous.get("native", {}))
 
     target, members = job["target"], job["members"]
     # The atomic desktop layout commit precedes retiring the empty native group.
     if state.get("applied") != job["id"]:
-        if parent and parent not in local:
+        owner = job.get("owner", parent)
+        if ((owner and owner not in local) or
+                (parent.startswith(SECTION) and parent[len(SECTION):] not in {s["id"] for s in sections})):
             raise ValueError("The parent project is no longer available.")
-        dest_project = project_id(parent) if parent else None
-        if parent and not dest_project:
-            record = local[parent]
+        dest_project = project_id(owner) if owner else None
+        if owner and not dest_project:
+            record = local[owner]
             p = call("project/create", {"name":record["name"], "roots":[{"path":r} for r in record.get("rootPaths", [])],
-                     "metadata":{"codex.localProjectId":parent}, "idempotencyKey":"chat-sync:"+parent})["project"]
-            maps[parent] = dest_project = p["id"]
+                     "metadata":{"codex.localProjectId":owner}, "idempotencyKey":"chat-sync:"+owner})["project"]
+            maps[owner] = dest_project = p["id"]
         dest_section = job["oldSection"] if action == "move" or action == "promote" and job["mixed"] else None
         now = int(time.time() * 1000)
         if action == "promote":
@@ -217,7 +269,7 @@ def run_change(home, call):
                 parents.pop(source, None)
                 bucket["sectionOrder"] = [k for k in bucket.get("sectionOrder", []) if k != "custom:"+source]
             retained.pop(source,None)
-            for child in job.get("children", []):
+            for child in job.get("children", []) + job.get("legacyChildren", []):
                 if any(s["id"] == child for s in sections): parents[child] = target
         elif action in ("create","demote"):
             # section/create has no idempotency key. Recover an interrupted create by its unique temporary name.
@@ -232,14 +284,13 @@ def run_change(home, call):
             if "custom:"+target not in order: order.append("custom:"+target)
             if action == "demote":
                 retained[target] = {"stable":source,"record":job["original"],"native":job["nativeRecord"],
-                                    "sections":job["priorSections"],"children":job["children"]}
+                                    "sections":job["priorSections"]}
                 local.pop(source,None)
                 maps.pop(source,None)
                 layout.data["project-order"] = [k for k in layout.data.get("project-order", []) if k != source]
                 for sid, previous in list(parents.items()):
                     if previous == source:
-                        if parent: parents[sid] = parent
-                        else: parents.pop(sid)
+                        parents[sid] = SECTION + target
                 for s in sections:
                     s["itemKeys"] = [k for k in s.get("itemKeys", []) if k != "codex:project:"+source]
         if action != "promote":
@@ -253,17 +304,17 @@ def run_change(home, call):
                 s["itemKeys"] = [k for k in s.get("itemKeys", []) if k not in member_keys]
                 if s["id"] == target and action=="demote" or s["id"]==source and action=="promote" and job["mixed"]:
                     s["itemKeys"].extend(ITEM+t for t in members)
-        for tid in members:
-            if action != "move" or parent:
+        for tid in members + job.get("nestedMembers", []):
+            if action != "move" or owner:
                 call("thread/metadata/update", {"threadId":tid, "projectId":dest_project or ""})
                 if dest_project:
-                    assignments[tid] = {"projectKind":"local","projectId":target if action=="promote" else parent}
+                    assignments[tid] = {"projectKind":"local","projectId":target if action=="promote" else owner}
                     layout.data.setdefault("thread-project-membership-host-ids", {})[tid] = "local"
                     if tid in projectless: projectless.remove(tid)
                 else:
                     assignments.pop(tid,None)
                     if tid not in projectless: projectless.append(tid)
-            if action != "move":
+            if action != "move" and ITEM + tid in member_keys:
                 sid = dest_section
                 if action == "promote" and not job["mixed"]:
                     old = next((s for s in sections if s["id"] == job["priorSections"].get(tid)), None)
