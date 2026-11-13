@@ -851,7 +851,7 @@ function installChatActions() {
   }
   window.addEventListener('csc-resume',event=>{
     const cursor=event.detail;
-    if(cursor?.turn && cursor.thread)navigate({...cursor,action:'navigate',id:crypto.randomUUID()}).catch(e=>notice(e.message));
+    if(cursor?.turn && cursor.thread)navigate({...cursor,action:'navigate',id:Symbol('resume')}).catch(e=>notice(e.message));
   });
   // Read the viewport after scrolling settles. Virtualized rows can be recycled between scrolls.
   function recordPosition(event){
