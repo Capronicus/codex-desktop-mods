@@ -12,7 +12,8 @@ async function run() {
   const home = path.join(root, 'profile');
   // Simulate an open desktop without starting a worker that waits on the user's app.
   const fixture = [
-    'import runpy, desktop_layout',
+    'import runpy, desktop_layout, hierarchy',
+    'hierarchy.start_worker = lambda home: None',
     'desktop_layout.desktop_running = lambda: True',
     'desktop_layout.start_worker = lambda home: None',
     'runpy.run_path("server.py", run_name="__main__")'
@@ -206,6 +207,42 @@ async function run() {
     await panel.getByText('Handoff saved for Home.').waitFor({timeout:5000}).catch(async error=>{throw new Error((await panel.locator('#action-status').innerText())+' · '+error.message)});
     const handoffs=path.join(folder,'codex-chat-sync-v1','handoffs-v1',peer,cfg.device);
     assert.equal((await fs.readdir(handoffs)).length,1);
+    const linked=crypto.randomUUID(),native=crypto.randomUUID(),section=crypto.randomUUID(),cloud='g-p-fixture';
+    const state=JSON.parse(await fs.readFile(layoutFile));
+    state['local-projects'][linked]={id:linked,name:'Tartarus',rootPaths:[],chatGptBacking:{accountId:'fixture',projectId:cloud}};
+    state['app-server-project-id-by-legacy-project-id-by-host']={['local:'+home]:{[linked]:native}};
+    state['codex-mods-sidebar-groups-v1']={fixture:{parents:{[section]:linked}}};
+    await fs.writeFile(layoutFile,JSON.stringify(state));
+    await fs.writeFile(path.join(home,'auth.json'),JSON.stringify({tokens:{account_id:'fixture'}}));
+    const events={},handlers={},mainCode=await fs.readFile(path.join(__dirname,'../../../chat-details-main.cjs'),'utf8');
+    new Function('require','process',mainCode)(name=>name==='electron'?{ipcMain:{
+      on:(key,fn)=>{events[key]=fn;},handle:(key,fn)=>{handlers[key]=fn;}}}:require(name),{env:{CODEX_HOME:home}});
+    const senderFrame={url:'app://-/index.html'},event={senderFrame,sender:{mainFrame:senderFrame}};
+    events['local-sidebar:groups'](event);
+    const groups=event.returnValue;
+    assert.deepEqual(groups.parents[section],[linked,native,cloud]);
+    assert.equal(groups.projectKeys[native],linked);
+    const sidebar=await browser.newPage();
+    await sidebar.setContent('<div></div>');
+    await sidebar.exposeFunction('openModControls',context=>handlers['local-chat-actions:context'](event,context));
+    await sidebar.addScriptTag({path:path.join(__dirname,'../../../sidebar-colours.js')});
+    await sidebar.evaluate(async ({project,cloud,groups})=>{
+      window.localChatDetails={openModControls,sidebarProjectKeys:groups.projectKeys};
+      const menus=createSidebarColours({preferencesReady:async()=>{},getPreference:()=>null,preferenceKeys:()=>[],watchPreferencePrefix:()=>{}});
+      const create=id=>menus.actionItems('project',id).find(it=>it.message.defaultMessage==='Create subsection…');
+      if(!create(project) || !create(cloud) || create('g-p-no-local-project')) throw Error('Unexpected project menu');
+      await create(cloud).onSelect();
+    },{project,cloud,groups});
+    await panel.getByRole('button',{name:'Refresh chat actions'}).click();
+    await panel.locator('#group-name').waitFor({state:'visible'});
+    assert.equal(await panel.locator('#group-action').inputValue(),'create');
+    assert.equal(await panel.locator('#group-parent').inputValue(),linked);
+    await panel.locator('#group-name').fill('Elysium');
+    await panel.getByRole('button',{name:'Save change',exact:true}).click();
+    await panel.getByText(/Queued: Elysium/).waitFor();
+    const job=JSON.parse(await fs.readFile(path.join(stateDir,'sidebar-group-change.json')));
+    assert.equal(job.parent,linked);
+    assert.equal(job.action,'create');
     console.log('Passed outgoing search and exclusions while paused, sidebar review and undo, sync controls and narrow layout in Chromium.');
   } finally {
     child.stdin.end();

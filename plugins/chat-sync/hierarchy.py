@@ -29,8 +29,7 @@ MAX_LEVELS = 3
 def placement(layout, action, source, parent):
     """Return the owning project and descendant sections. Legacy project parents are bare IDs."""
     sections = {SECTION + row["id"]: row for row in layout.sections if row["id"] != desktop.PINNED}
-    available = {key for key, project in layout.projects.items()
-                 if projects.valid_id(key) and not project.get("chatGptBacking")}
+    available = layout.subsection_projects()
     parents = {SECTION + key: value for key, value in group_state(layout).get("parents", {}).items()
                if SECTION + key in sections}
     root = source if action == "demote" else SECTION + source
@@ -58,19 +57,25 @@ def placement(layout, action, source, parent):
         owner = parents.get(owner, "")
     if len(ancestors) + max(descendants.values()) > MAX_LEVELS:
         raise ValueError("Groups can be three levels deep. Choose a higher parent or move a child first.")
-    if owner and any("codex:project:" + owner in sections[node].get("itemKeys", [])
-                     for node in descendants if node in sections):
-        raise ValueError("Move the parent project out of this section first.")
+    if owner:
+        project_items = {"codex:project:" + owner, "codex:project:" + (layout.project_ids.get(owner) or owner)}
+        backing = available[owner].get("chatGptBacking") or {}
+        if backing.get("projectId"):
+            project_items.add("chatgpt:project:" + backing["projectId"])
+        if any(project_items.intersection(sections[node].get("itemKeys", [])) for node in descendants if node in sections):
+            raise ValueError("Move the parent project out of this section first.")
     return owner, [node[len(SECTION):] for node in descendants if node != root]
 
 
 def inventory(layout=None):
     layout = layout or desktop.Layout(sync.HOME)
     sections = {s["id"]: s["name"] for s in layout.sections if s["id"] != desktop.PINNED}
-    local = {i: p["name"] for i, p in layout.projects.items()
-             if projects.valid_id(i) and not p.get("chatGptBacking")}
+    parents = layout.subsection_projects()
+    local = {key: project["name"] for key, project in parents.items()}
     job = sync.read_json(sync.STATE / QUEUE, {})
-    return {"projects": local, "sections": sections, "parents": group_state(layout).get("parents", {}),
+    return {"projects": local, "linkedProjects": [key for key,p in parents.items() if p.get("chatGptBacking")],
+            "projectAliases": {native:key for key,native in layout.project_ids.items() if key in parents},
+            "sections": sections, "parents": group_state(layout).get("parents", {}),
             "ready": bool(layout.enabled and layout.account), "pending": job.get("label", "") if job.get("account")==layout.account else "",
             "started": bool(job.get("started")), "error": job.get("error", "") if job.get("account")==layout.account else ""}
 
@@ -170,7 +175,7 @@ def change(action, source="", parent="", name="", folder=""):
                 label = name.strip()
             elif action in ("promote", "move") and source in groups["sections"]:
                 label = groups["sections"][source]
-            elif action == "demote" and source in groups["projects"] and source != parent:
+            elif action == "demote" and source in groups["projects"] and source not in groups["linkedProjects"] and source != parent:
                 label = groups["projects"][source]
             else:
                 raise ValueError("Choose an existing local sidebar group.")
@@ -266,7 +271,7 @@ def run_change(home, call):
         project = local.get(source, {})
         if action == "assign":
             leaf = next((s for s in sections if SECTION+s["id"] == parent), None)
-            if parent.startswith(SECTION) and not leaf or not parent.startswith(SECTION) and parent not in local:
+            if parent.startswith(SECTION) and not leaf or not parent.startswith(SECTION) and parent not in layout.subsection_projects():
                 raise ValueError("The destination group changed. Check the pending batch.")
             owner = parent
             seen = set()
@@ -322,11 +327,13 @@ def run_change(home, call):
     # The atomic desktop layout commit precedes retiring the empty native group.
     if state.get("applied") != job["id"]:
         owner = job.get("owner", parent)
-        if ((owner and owner not in local) or
+        if ((owner and owner not in layout.subsection_projects()) or
                 (parent.startswith(SECTION) and parent[len(SECTION):] not in {s["id"] for s in sections})):
             raise ValueError("The parent project is no longer available.")
         dest_project = project_id(owner) if owner else None
-        if owner and not dest_project:
+        if owner and not dest_project and local[owner].get("chatGptBacking") and (members or job.get("nestedMembers")):
+            raise ValueError("The linked project is not available in the local Codex catalogue.")
+        if owner and not dest_project and not local[owner].get("chatGptBacking"):
             record = local[owner]
             p = call("project/create", {"name":record["name"], "roots":[{"path":r} for r in record.get("rootPaths", [])],
                      "metadata":{"codex.localProjectId":owner}, "idempotencyKey":"chat-sync:"+owner})["project"]
