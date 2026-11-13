@@ -52,7 +52,8 @@ class FolderEncryption(unittest.TestCase):
         result = self.a.tool("set_folder_encryption", enabled=True)
         self.assertTrue(result["key_created"])
         key = Path(result["key_file"])
-        self.assertEqual(key, self.a.home / "chat-sync" / "vault.key")
+        # The profile path can be spelled with a short Windows name here and its long form there.
+        self.assertTrue(key.samefile(self.a.home / "chat-sync" / "vault.key"))
         if os.name != "nt":
             self.assertEqual(key.stat().st_mode & 0o077, 0)
         self.share_key(self.a, self.b)
