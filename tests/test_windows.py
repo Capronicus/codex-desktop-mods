@@ -98,6 +98,14 @@ class WindowsModsTests(unittest.TestCase):
         self.assertFalse(first.exists())
         self.assertTrue(second.exists())
 
+    def test_interrupted_staging_is_removed(self):
+        stale = self.cache / 'runtimes' / 'tmpabcd1234' / 'app'
+        stale.mkdir(parents=True)
+        (stale / mods.EXE).write_bytes(b'partial')
+        with patch.object(mods, 'running_copy', return_value=False):
+            self.assertTrue(mods.prune(self.cache))
+        self.assertFalse(stale.parent.exists())
+
     def test_mismatched_binding_does_not_activate(self):
         wrong = self.executable.read_bytes().replace(mods.asar_hash(self.app/mods.ASAR).encode(), b'0'*64)
         self.executable.write_bytes(wrong)

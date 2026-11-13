@@ -1,9 +1,5 @@
 """Dependency-free MCP stdio server. Each input and output line is one JSON-RPC message."""
 import json
-from http.client import HTTPException
-import sqlite3
-import struct
-import subprocess
 import sys
 from pathlib import Path
 
@@ -83,8 +79,8 @@ def dispatch(method, params):
             if invitation:
                 content.append({'type': 'text', 'text': json.dumps({'activation_offer': invitation})})
         return {'content': content}
-    except (OSError, ValueError, KeyError, sqlite3.Error, HTTPException, struct.error, subprocess.SubprocessError) as error:
-        return {'isError': True, 'content': [{'type': 'text', 'text': str(error)}]}
+    except Exception as error:  # A failing tool must not end the server process.
+        return {'isError': True, 'content': [{'type': 'text', 'text': str(error) or type(error).__name__}]}
 
 
 def respond(line):
@@ -107,6 +103,8 @@ def respond(line):
         body = {'error': {'code': -32700, 'message': 'Invalid JSON'}}
     except RpcError as error:
         body = {'error': {'code': error.code, 'message': str(error)}}
+    except Exception as error:
+        body = {'error': {'code': -32603, 'message': str(error) or type(error).__name__}}
     return {'jsonrpc': '2.0', 'id': message_id, **body}
 
 

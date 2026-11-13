@@ -302,11 +302,17 @@ def open_rollout(path):
         if not shutil.which("zstd"):
             raise ValueError("Compressed chat needs Python 3.14+ or the zstd executable.")
         proc = subprocess.Popen(["zstd", "-qdc", "--", str(path)], stdout=subprocess.PIPE)
+        drained = False
         try:
             yield proc.stdout
+            # A reader may stop after the header or one reply. Only a stream read
+            # to its end can report that the archive itself was unreadable.
+            drained = not proc.stdout.read(1)
         finally:
             proc.stdout.close()
-            if proc.wait():
+            if not drained:
+                proc.kill()
+            if proc.wait() and drained:
                 raise ValueError("Could not unpack the compressed conversation.")
     else:
         try:
@@ -602,7 +608,8 @@ def recover_projections():
         if UUID.fullmatch(journal.name):
             try:
                 recover_projection(journal)
-            except Busy:
+            except (Busy, OSError, ValueError, sqlite3.Error):
+                # Only this chat waits for its timeline. Other chats keep syncing.
                 busy.add(journal.name)
     return busy
 
@@ -886,7 +893,11 @@ def run(automatic=False):
         if pending:
             from native_names import apply_names
 
-            for tid in apply_names(pending, HOME):
+            try:
+                named = apply_names(pending, HOME)
+            except (OSError, sqlite3.Error):
+                named = []  # A busy catalogue keeps the names pending for the next pass.
+            for tid in named:
                 state[tid].pop("pending_name", None)
             atomic(state_path, encode(state))
         stats["pending_names"] = sum(bool(s.get("pending_name")) for s in state.values())

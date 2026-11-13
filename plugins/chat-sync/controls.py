@@ -63,6 +63,7 @@ def status():
         "sidebarReview": {
             "undoBatch": journal.get("id"),
             "lastApplied": journal.get("updated_at"),
+            "undoError": journal.get("error"),
             "queued": ("undo" if queue.get("undo") else "apply") if queue else None,
             "required": bool(cfg.get("sidebar") and (sync.STATE / "sidebar-preview.json").is_file()),
         },

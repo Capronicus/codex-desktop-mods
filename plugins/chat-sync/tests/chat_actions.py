@@ -146,6 +146,27 @@ class ChatActions(unittest.TestCase):
             projects.set_private("chat",self.thread,True)
             with self.assertRaises(ValueError): actions.compare_handoff_file(self.work,request)
 
+    def test_handoff_file_ignores_checkout_line_endings(self):
+        request=ident()
+        with self.on(self.work) as h:
+            file=h/"checkout"/"notes.md"
+            file.write_bytes(b"first\nsecond\n")
+            actions.handoff(self.thread,self.turn,self.home,request,reference=str(file))
+        with self.on(self.home) as h:
+            file=h/"checkout"/"notes.md"
+            for contents,status in [(b"first\r\nsecond\r\n","Same version"),(b"first\r\nedited\r\n","Changed here")]:
+                file.write_bytes(contents)
+                self.assertEqual(actions.compare_handoff_file(self.work,request)["status"],status)
+            # A line ending can straddle two read blocks. Binary files compare byte for byte.
+            size=1024*1024-1
+            file.write_bytes(b"x"*size+b"\r\ny")
+            crlf=actions.fingerprint(file)
+            file.write_bytes(b"x"*size+b"\ny")
+            self.assertEqual(crlf[1],actions.fingerprint(file)[1])
+            self.assertNotEqual(crlf[0],actions.fingerprint(file)[0])
+            file.write_bytes(b"\0\r\n")
+            self.assertIsNone(actions.fingerprint(file)[1])
+
     def test_both_rule_scopes_and_resume(self):
         with self.on(self.work) as h:
             folder = h / "checkout" / "private"

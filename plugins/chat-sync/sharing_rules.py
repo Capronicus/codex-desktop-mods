@@ -25,7 +25,10 @@ def records(cfg, vault):
     docs = [(cfg["device"], cfg.get("shared_exclusions", {}))]
     for file in (vault/"sharing-rules-v1").glob("*.json"):
         if projects.valid_id(file.stem):
-            docs.append((file.stem, sync.read_json(file)))
+            try:
+                docs.append((file.stem, sync.read_json(file)))
+            except (OSError, ValueError):
+                continue  # Still arriving. The cached rows of this desktop stay in force.
     for writer, doc in docs:
         if not isinstance(doc, dict):
             raise ValueError("Waiting for complete project sharing rules.")

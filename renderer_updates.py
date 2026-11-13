@@ -12,6 +12,20 @@ def replace(source, pattern, replacement, count=1):
     return result
 
 
+def find(pattern, source):
+    # A missing binding is an incompatible build. The launcher then opens the stock app.
+    match = re.search(pattern, source)
+    if match is None:
+        raise ValueError(f'Missing renderer hook {pattern}')
+    return match
+
+
+def swap(source, old, new, count=1):
+    if source.count(old) != count:
+        raise ValueError(f'Unexpected number of matches for renderer text {old}: {source.count(old)}')
+    return source.replace(old, new)
+
+
 def adapt(role, source, files, pet_assets):
     if role == 'dependency':
         return source
@@ -33,7 +47,7 @@ def adapt(role, source, files, pet_assets):
         """ + body
     extra = ''
     if role == 'pet-api':
-        hooks = re.search(re.escape(require) + r'\("(y5DF|zTeN)"\)', body)[1]
+        hooks = find(re.escape(require) + r'\("(y5DF|zTeN)"\)', body)[1]
         sprite = 'DRpS' if hooks == 'y5DF' else 'FPUb'
         exports = header[:-1].split(',')[1]
         extra = files('chat-layout.js') + f"""
@@ -54,8 +68,8 @@ def adapt(role, source, files, pet_assets):
         """
     elif role == 'row':
         # These selectors are exported by separately fingerprinted modules.
-        hook_alias = re.search(r'\(0,(\w+)\.Ul\)', body)[1]
-        hooks = re.search(r'\b' + hook_alias + r'=\w+\("([^"]+)"\)', body)[1]
+        hook_alias = find(r'\(0,(\w+)\.Ul\)', body)[1]
+        hooks = find(r'\b' + hook_alias + r'=\w+\("([^"]+)"\)', body)[1]
         extra = f"""
           const cscHooks={require}("{hooks}"), cscReact={require}("zd8w");
           function useSidebarColours(active,attrs,props) {{
@@ -75,7 +89,7 @@ def adapt(role, source, files, pet_assets):
               "data-csc-activity-day":csc.activityDay(attrs?.["data-csc-updated"] ?? props.cscUpdated)}};
           }}
         """
-        attrs = re.search(r'dataAttributes:(\w+)\}=e', body)[1]
+        attrs = find(r'dataAttributes:(\w+)\}=e', body)[1]
         body = replace(body, r'(\w+)=("sidebar"===\w+\|\|\w+\|\|\w+),',
                        lambda m: f'{m[0]}cscAttrs=useSidebarColours({m[1]},{attrs},e),')
         body = replace(body, r'(\{\.\.\.' + attrs + r',)(ref:\w+,className:\w+,"data-sidebar-indicator")',r'\1...cscAttrs,\2')
@@ -114,7 +128,7 @@ def adapt(role, source, files, pet_assets):
                        r'\1csc.menuItem("project",cscId),...csc.actionItems("project",cscId),')
     elif role == 'linkedmenu':
         memo_header = r'([\w$]+)=\(0,r\.c\)\((\d+)\),\{align:'
-        memo, slots = re.search(memo_header, body).groups()
+        memo, slots = find(memo_header, body).groups()
         body = replace(body, memo_header, f'cscId=e.cscProjectId,{memo}=(0,r.c)({int(slots)+1}),{{align:')
         body = replace(body, re.escape(memo)+r'\[16\]!==t\)\{(let [\w,]+;)if\(n=\[\{id:(\w+),message:V',
                        lambda m: f'{memo}[16]!==t||{memo}[{slots}]!==cscId){{{m[1]}{memo}[{slots}]=cscId;'
@@ -126,21 +140,22 @@ def adapt(role, source, files, pet_assets):
         body = replace(body,r'id:"organization",items:(\w+)\},\{id:"continue"',
                        r'id:"organization",items:t.surface==="sidebar"&&t.conversationId?[csc.menuItem("chat","chatgpt:conversation:"+t.conversationId),...\1]:\1},{id:"continue"')
     elif role == 'transcript':
-        entry = re.search(r'entry:(\w+),latestTurnFooter:\w+,latestTurnFollowContentRef:\w+\}',body)[1]
+        entry = find(r'entry:(\w+),latestTurnFooter:\w+,latestTurnFollowContentRef:\w+\}',body)[1]
         # Module-scope aliases avoid the row renderer's shadowed React binding.
         extra = f'const cscReact={require}("zd8w"),cscJsx={require}("ABep");\n' + files('chat-details.js')
         body = replace(body, r'(className:"\[&_\[data-virtualized-turn-content\]\]:\[content-visibility:visible\]","data-turn-key":\w+,children:)(\w+)',
                        lambda m: m[1]+f'withChatDetails({entry},{m[2]},cscReact,cscJsx)')
     elif role == 'cloudtime':
         header_re = r'let t,n,i=\(0,s\.c\)\((\d+)\),\{dilPreparationId:'
-        slot = int(re.search(header_re,body)[1])
+        slot = int(find(header_re,body)[1])
         body = replace(body,header_re,f'let t,n,i=(0,s.c)({slot+1}),{{dilPreparationId:')
-        graph = re.search(r'\(\{conversationId:e,messageId:t\},\{get:n\}\)=>\{let a=n\((\w+\.Jv),e\)\?\.\[t\]\?\.message',body)[1]
-        scope = re.search(r'\(0,u\.i1\)\((\w+\.u),\(\{conversationId:e,messageId:t\}',body)[1]
+        graph = find(r'\(\{conversationId:e,messageId:t\},\{get:n\}\)=>\{let a=n\((\w+\.Jv),e\)\?\.\[t\]\?\.message',body)[1]
+        scope = find(r'\(0,u\.i1\)\((\w+\.u),\(\{conversationId:e,messageId:t\}',body)[1]
         # The native graph and scope variables are initialized later in this factory.
         cloud = files('chat-details-cloud.js')
-        cloud = cloud.replace('g(Y,',f'(0,u.i1)({scope},').replace('get(Nr,',f'get({graph},')
-        cloud = cloud.replace('EP.useMemo','f.useMemo').replace('=Z(chatDetailsCloudTimeSelector','=u._U(chatDetailsCloudTimeSelector').replace('$.','a.')
+        for old, new, count in [('g(Y,',f'(0,u.i1)({scope},',1), ('get(Nr,',f'get({graph},',1), ('EP.useMemo','f.useMemo',1),
+                                ('=Z(chatDetailsCloudTimeSelector','=u._U(chatDetailsCloudTimeSelector',1), ('$.','a.',5)]:
+            cloud = swap(cloud, old, new, count)
         extra = cloud
         body = replace(body,r'i\[4\]!==(\w+)\|\|i\[5\]!==([\w$]+)\?\(n=e=>\(0,a.jsx\)\((\w+),\{item:\2,index:\1,children:e\}\),i\[4\]=\1',
                        lambda m:f'i[{slot}]!==C||i[4]!=={m[1]}||i[5]!=={m[2]}?(n=e=>(0,a.jsx)({m[3]},{{item:{m[2]},index:{m[1]},children:withCloudChatTime(e,{m[2]},C)}}),i[{slot}]=C,i[4]={m[1]}')
@@ -170,9 +185,9 @@ def nest_sections(source, helper, legacy=False):
     if len(matches) != 1:
         raise ValueError('Unrecognised desktop custom section renderer')
     start, end, body = matches[0]
-    react = re.search(r'\(0,([\w$]+)\.useRef\)\(null\)', body)[1]
-    section = re.search(r'`custom:\$\{([\w$]+)\.id\}', body)[1]
-    node = re.search(r',([\w$]+)$', body)[1]
+    react = find(r'\(0,([\w$]+)\.useRef\)\(null\)', body)[1]
+    section = find(r'`custom:\$\{([\w$]+)\.id\}', body)[1]
+    node = find(r',([\w$]+)$', body)[1]
     portal = 'Qs().createPortal' if legacy else 'n("v7qY").createPortal'
     key = f'window.localChatDetails?.subsectionParents?.[{section}.id]'
     new = f'{key}?{react}.createElement(cscNestedGroup,{{React:{react},portal:cscSectionPortal,section:{section}.id,parents:{key}}},{node}):{node}'

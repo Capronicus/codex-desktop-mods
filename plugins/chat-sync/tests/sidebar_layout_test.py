@@ -93,6 +93,29 @@ class DesktopSidebar(unittest.TestCase):
             self.assertTrue(sync.read_json(config)["paused"])
             self.assertFalse(sync.read_json(config)["sidebar"])
 
+    def test_queued_undo_that_cannot_finish_is_released_with_its_reason(self):
+        with TemporaryDirectory() as temp:
+            home = Path(temp)
+            directory = home / "chat-sync"
+            device, a, b = ident(), ident(), ident()
+            state = home / ".codex-global-state.json"
+            config = directory / "config.json"
+            queue = directory / desktop_layout.QUEUE
+            journal = directory / "sidebar-undo.json"
+            sync.atomic(config, sync.encode({"device": device, "sidebar": True}))
+            # The order changed again after the batch, so this undo no longer applies.
+            sync.atomic(state, sync.encode({"local-projects": {}, "project-order": [a]}))
+            sync.atomic(journal, sync.encode({"device": device, "id": "latest", "native": {},
+                                              "desktop": [[["project-order"], [a, b], [b, a]]]}))
+            sync.atomic(queue, sync.encode({"device": device, "account": "", "undo": True, "batch_id": "latest"}))
+            with (patch.object(desktop_layout, "desktop_pid", return_value=None),
+                  patch.object(desktop_layout, "desktop_running", return_value=False)):
+                desktop_layout.finish_on_exit(home)
+            self.assertFalse(queue.exists())
+            self.assertIn("changed after this batch", sync.read_json(journal)["error"])
+            self.assertEqual(sync.read_json(state)["project-order"], [a])
+            self.assertTrue(sync.read_json(config)["sidebar"])
+
     def test_queued_reorder_respects_intervening_edits(self):
         with TemporaryDirectory() as temp:
             home = Path(temp)

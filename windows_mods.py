@@ -25,6 +25,7 @@ MARKER = 'Capronicus Codex Desktop Mods launcher'
 EXE = 'ChatGPT.exe'
 ASAR = Path('resources') / 'app.asar'
 REV = re.compile(r'[0-9a-f]{64}')
+STAGING = re.compile(r'tmp[0-9a-z_]{8}')
 # Electron stores the ASAR header hash in the INTEGRITY/ELECTRONASAR PE resource.
 INTEGRITY = re.compile(rb'\[\{"file":"resources\\\\app\.asar","alg":"SHA256","value":"([0-9a-fA-F]{64})"\}\]')
 
@@ -235,6 +236,9 @@ def prune(root, keep=None):
         raise ValueError('Expected an ordinary runtime cache directory.')
     old = [p for p in directory.iterdir() if REV.fullmatch(p.name) and p != keep and cache_directory(p)]
     retired = [p for p in directory.glob('retired-*') if REV.fullmatch(p.name[8:]) and cache_directory(p)]
+    # An interrupted rebuild leaves its staging copy. Builds hold the install lock,
+    # so any staging directory seen here is finished with.
+    retired += [p for p in directory.glob('tmp*') if STAGING.fullmatch(p.name) and cache_directory(p)]
     if (old or retired) and running_copy(directory):
         return False
     done = True
@@ -326,7 +330,7 @@ def launch():
             dest = runtime(*pkg, root)
             prune_unused(root, dest)
             start_packaged(dest / EXE)
-    except (OSError, ValueError, KeyError, struct.error, subprocess.SubprocessError) as exc:
+    except Exception as exc:  # Any failure to prepare the patched copy opens the stock app.
         import ctypes
         open_stock()
         ctypes.windll.user32.MessageBoxW(None, 'Opening the standard ChatGPT app.\n\n' + str(exc),

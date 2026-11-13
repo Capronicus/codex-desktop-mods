@@ -298,6 +298,11 @@ def runtime_for(before):
 def prune_runtimes(keep):
     # A desktop process may still be using an older cache after a package update.
     # Only consider directories created by this generation of the launcher.
+    # An interrupted rebuild leaves its staging directory. Builds hold the launcher lock,
+    # so any staging directory seen here is finished with.
+    for stale in CACHE.glob('tmp*'):
+        if re.fullmatch(r'tmp[0-9a-z_]{8}', stale.name) and stale.is_dir() and not stale.is_symlink():
+            shutil.rmtree(stale, ignore_errors=True)
     candidates = {p for p in CACHE.glob('runtime-*-tmp*')
                   if re.fullmatch(r'runtime-[0-9a-f]{16}-tmp[0-9a-z_]+', p.name)
                   and p.is_dir() and not p.is_symlink() and p not in keep}
@@ -384,7 +389,7 @@ def launch_runtime():
         raise ValueError(previous['reason'])
     try:
         target = runtime_for(before)
-    except (ValueError, KeyError, struct.error) as error:
+    except (ValueError, LookupError, TypeError, AttributeError, struct.error) as error:
         if signature() == before:
             atomic_write(INSTALL / 'unsupported.json',
                          json.dumps({'revision': revision, 'reason': str(error)}).encode())
@@ -413,7 +418,7 @@ def launch(args):
             # flock's descriptor is close-on-exec. Another rebuild can safely
             # inspect /proc once the selected executable has started.
             exec_runtime(launch_runtime() / 'ChatGPT', args)
-    except (OSError, ValueError, KeyError, struct.error, ImportError) as error:
+    except Exception as error:  # Any failure to prepare the patched copy opens the stock app.
         warn = f'Opening the system app. The mods could not be applied: {error}'
         print(warn, file=sys.stderr)
         if shutil.which('notify-send'):

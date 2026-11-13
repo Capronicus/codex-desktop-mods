@@ -165,7 +165,8 @@ function renderSidebar(s){
   el('preview-sidebar').disabled=working||!enabled||!s.available||undoQueued;
   el('undo-sidebar').hidden=el('undo-hint').hidden=!info.undoBatch||undoQueued;
   el('undo-sidebar').disabled=working;
-  el('undo-hint').textContent=(info.lastApplied?'Last batch · '+new Date(info.lastApplied*1000).toLocaleString()+'. ':'')+
+  el('undo-hint').textContent=(info.undoError?'The last undo did not finish: '+info.undoError+' ':'')+
+    (info.lastApplied?'Last batch · '+new Date(info.lastApplied*1000).toLocaleString()+'. ':'')+
     'Undo restores the previous sidebar and turns off project, section and order sync on this desktop.';
   el('preview-result').hidden=!preview;
   el('change-list').replaceChildren();
