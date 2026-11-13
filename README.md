@@ -41,6 +41,7 @@ The six appearance switches work without connecting a folder.
 
 - Right-click a chat message or a selected phrase and choose **Bookmark message** or **Bookmark selection**. Give it a name in Mod Controls. Right-click the pet and choose **Bookmarks** to return to it. A changed phrase falls back to its message.
 - Open **Saved views** at the top of the sidebar. Choose **New view** to combine a local project, origin device, last update and outstanding receipt. For example, save **Work this week** or **Tartarus awaiting Home**. Matches open the original local chats. An unknown origin cannot match a device filter. Bookmarks and saved views stay on this desktop.
+- **Saved views** has a **Filter chats by title** box. It narrows the chosen view, or every local chat when no view is chosen.
 - In **Mod Controls → Organize projects and sections**, use **Add to batch** to create nested groups, move sections or move several chats together. Preview the list, choose **Apply batch on quit**, then fully quit and reopen once.
 - To share nesting, enable **Projects and sections** and **Subsection tree** in Mod Controls on each participating desktop. Parent links use shared group IDs. Each PC keeps its linked checkout path.
 - When handing off a reply, optionally include a project file. The receiving PC can compare its linked copy and see **Same version**, **Changed here** or **Missing here**. The handoff includes the project-relative path and a SHA-256 fingerprint. File contents stay in their respective checkouts.
@@ -111,6 +112,8 @@ Right-click a project, chat or custom section heading and choose **Project colou
 
 Messages show their local date and time when the chat history provides a timestamp. On a completed Codex turn, **225 tokens this turn · 340 chat total** means the model used 225 input and output tokens across the calls for that turn, bringing the recorded conversation total to 340. Reopening the chat shows the counts through each reply. Regular ChatGPT conversations show timestamps when available.
 
+A finished reply also shows how long its turn took, such as **took 42 s**. Hover over the token count for the input, cached, output and reasoning tokens of that turn when the history records them.
+
 The mod reads usage from both plain and compressed local Codex histories. Reopening a compressed chat shows its recorded timestamps and token counts. Missing usage stays blank.
 
 ![A test chat showing two reply timestamps and the running token total](images/chat-details.png)
@@ -153,6 +156,18 @@ python3 "${XDG_DATA_HOME:-$HOME/.local/share}/codex-sidebar-colours/sidebar-colo
 
 To start the stock app directly after quitting the modded instance, run `/usr/bin/chatgpt`.
 
+## After a desktop update
+
+If the mods stop applying after an app update, ask the plugin **“Check desktop compatibility.”** It lists the renderer modules that changed. Maintainers can run the same check on any build and get candidate catalogue entries:
+
+```sh
+python3 tools/catalogue_report.py /usr/lib/chatgpt/resources/app.asar --candidates new-modules.json
+```
+
+Add `--record tests/fixtures/renderer` to save the supported modules locally. `python3 tests/renderer_fixtures.py` then runs every adapter over them without the desktop app. The recordings are excerpts of the app and are ignored by Git.
+
+On Windows, the first launch after an app update shows a small progress window while the patched copy is rebuilt.
+
 ## Tests
 
 Run the history reader and launcher tests from the repository folder. They use synthetic chat history and disposable desktop packages.
@@ -162,4 +177,4 @@ node tests/chat-details.cjs
 python3 tests/updates.py
 ```
 
-With the Linux desktop app and Google Chrome installed, run `node tests/sidebar-colours.cjs` to check the rendered colours in both themes, `node tests/sections.cjs` for section inheritance and `node tests/chat-layout.cjs` to check chat width, panel clearance and scroll behaviour. Run `node tests/saved-views.cjs` for the sidebar view editor and receipt filters. Run `node tests/animated-words.cjs` to check the selected occurrence, persistence and reduced motion.
+With the Linux desktop app and Google Chrome installed, run `node tests/sidebar-colours.cjs` to check the rendered colours in both themes, `node tests/sections.cjs` for section inheritance and `node tests/chat-layout.cjs` to check chat width, panel clearance and scroll behaviour. Run `node tests/saved-views.cjs` for the sidebar view editor, title filter and receipt filters, and `node tests/marks-bridge.cjs` for sharing saved views and text animations. Run `node tests/animated-words.cjs` to check the selected occurrence, persistence and reduced motion.

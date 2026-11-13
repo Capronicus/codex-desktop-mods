@@ -1,7 +1,6 @@
 """Check blocks referenced by current device heads and restore matching local bytes."""
 
 from collections import Counter, defaultdict
-import gzip
 import stat
 import subprocess
 import tempfile
@@ -9,16 +8,19 @@ import time
 
 import projects
 import sync
+import vault_crypto
 
 
 def inspect_block(vault, key):
-    path = sync.block_path(vault, key)
+    path = sync.block_file(vault, key)
     try:
         if path.resolve() != path or not stat.S_ISREG(path.stat().st_mode):
             return "unreadable"
         return len(sync.block_data(vault, key))
     except FileNotFoundError:
         return "missing"
+    except vault_crypto.Locked:
+        return "unreadable"  # Encrypted, and this desktop has no folder key.
     except ValueError:
         return "damaged"
     except (OSError, RuntimeError):
@@ -35,14 +37,15 @@ def restore_chat(vault, tid, entry, targets, states, restored):
                 continue
             staged.seek(offset)
             block = staged.read(length)
-            if len(block) != length or sync.digest(block) != key:
+            form = sync.block_form(key, block) if len(block) == length else None
+            if not form:
                 continue
             # A peer or the folder client may have restored it since our scan.
             current = inspect_block(vault, key)
             if current in ("missing", "damaged"):
                 if not vault.is_dir() or vault.resolve() != vault:
                     raise OSError("Sync folder unavailable")
-                sync.atomic(sync.block_path(vault, key), gzip.compress(block, compresslevel=3, mtime=0))
+                sync.atomic(sync.block_path(vault, key).with_suffix(form[0]), form[1])
                 current = inspect_block(vault, key)
                 if current == length:
                     restored.add(key)

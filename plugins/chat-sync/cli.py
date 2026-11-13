@@ -49,6 +49,7 @@ def main():
     sub.add_parser("order").add_argument("mode", choices=("on", "off"))
     sub.add_parser("marks").add_argument("mode", choices=("on", "off"))
     sub.add_parser("archive").add_argument("mode", choices=("on", "off"))
+    sub.add_parser("encryption").add_argument("mode", choices=("on", "off"))
     for command, fields in {
         "projects": [],
         "link": ["local_project", "shared_project", "folder"],
@@ -77,6 +78,8 @@ def main():
             result = sync.setup(args.folder, args.automatic)
         elif args.command in ("sidebar", "colours", "order", "settings", "marks", "archive"):
             result = sync.set_exchange_option(args.command, args.mode == "on")
+        elif args.command == "encryption":
+            result = sync.set_encryption(args.mode == "on")
         elif args.command in ("pause", "resume"):
             result = sync.set_paused(args.command == "pause")
         elif args.command == "local-only":

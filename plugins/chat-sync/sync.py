@@ -144,6 +144,7 @@ def status():
         "tree": bool(cfg and cfg.get("tree")),
         "marks": bool(cfg and cfg.get("marks")),
         "archive": bool(cfg and cfg.get("archive")),
+        "encrypted": bool(cfg and cfg.get("encrypted")),
         "device_name": cfg and cfg.get("device_name"),
         "device_emoji": cfg and cfg.get("device_emoji", ""),
         "sidebar_preview": {k: preview[k] for k in ("id", "counts") if k in preview} or None,
@@ -190,6 +191,32 @@ def set_exchange_option(option, enabled):
         cfg[option] = enabled
         atomic(CONFIG, encode(cfg))
     return status()
+
+
+def set_encryption(enabled):
+    """Encrypt chat histories and titles this desktop uploads from now on."""
+    import vault_crypto
+
+    if type(enabled) is not bool:
+        raise ValueError("Choose whether to encrypt chat histories.")
+    with lock(STATE / "sync.lock"):
+        cfg = read_json(CONFIG)
+        if not cfg:
+            raise ValueError("Choose a private chat sync folder first.")
+        created = False
+        if enabled:
+            if vault_crypto.stored_key() is None:
+                vault_crypto.create_key()
+                created = True
+            # Every chat is published again in its encrypted form on the next pass.
+            state_path = STATE / ("state-" + cfg["device"] + ".json")
+            state = read_json(state_path, {})
+            for row in state.values():
+                row.pop("token", None)
+            atomic(state_path, encode(state))
+        cfg["encrypted"] = enabled
+        atomic(CONFIG, encode(cfg))
+    return {"encrypted": enabled, "key_file": str(vault_crypto.key_file()), "key_created": created}
 
 
 def sync_settings_now(action="sync", approval=""):
@@ -349,18 +376,54 @@ def block_path(vault, key):
     return vault / "blocks" / key[:2] / (key + ".gz")
 
 
+def block_file(vault, key):
+    """The stored file of a block: its encrypted form when present, otherwise the plain one."""
+    plain = block_path(vault, key)
+    secret = plain.with_suffix(".enc")
+    return secret if secret.exists() else plain
+
+
+def block_form(key, data, secret=None):
+    """Return the suffix and bytes that store data under this name, or None for another block."""
+    import vault_crypto
+
+    packed = gzip.compress(data, compresslevel=3, mtime=0)
+    if digest(data) == key:
+        return ".gz", packed
+    secret = secret or vault_crypto.stored_key()
+    if secret and vault_crypto.block_name(secret, data) == key:
+        return ".enc", vault_crypto.seal(secret, b"block:" + bytes.fromhex(key), packed)
+    return None
+
+
 def put_block(vault, data):
-    key = digest(data)
-    dest = block_path(vault, key)
+    import vault_crypto
+
+    secret = vault_crypto.writing_key()
+    key = vault_crypto.block_name(secret, data) if secret else digest(data)
+    suffix, stored = block_form(key, data, secret)
+    dest = block_path(vault, key).with_suffix(suffix)
     if not dest.exists():
-        atomic(dest, gzip.compress(data, compresslevel=3, mtime=0))
+        atomic(dest, stored)
     return key
 
 
 def block_data(vault, key):
-    path = block_path(vault, key)
+    path = block_file(vault, key)
     if path.stat().st_size > BLOCK + 65536:
         raise ValueError("Oversized block")
+    if path.suffix == ".enc":
+        import vault_crypto
+
+        secret = vault_crypto.stored_key()
+        packed = vault_crypto.unseal(secret, b"block:" + bytes.fromhex(key), path.read_bytes())
+        try:
+            data = zlib.decompressobj(wbits=31).decompress(packed, BLOCK + 1)
+        except zlib.error as exc:
+            raise ValueError("Unreadable compressed block") from exc
+        if len(data) > BLOCK or vault_crypto.block_name(secret, data) != key:
+            raise ValueError("Block checksum mismatch")
+        return data
     try:
         with gzip.open(path, "rb") as stream:
             data = stream.read(BLOCK + 1)
@@ -570,6 +633,17 @@ def latest_history(vault, choices, local):
     return best, bool(local and histories[tuple(local["chunks"])] == longest)
 
 
+def read_version(vault, tid, revision):
+    import vault_crypto
+
+    data = (vault / "versions" / tid / (revision + ".json")).read_bytes()
+    if vault_crypto.sealed(data):
+        data = vault_crypto.unseal(vault_crypto.stored_key(), b"revision:" + bytes.fromhex(revision), data)
+    if digest(data) != revision:
+        raise ValueError("Invalid snapshot checksum")
+    return valid_manifest(json.loads(data), tid)
+
+
 def shared_heads(vault, skipped):
     result = {}
     for path in (vault / "heads").glob("*/*.json"):
@@ -580,11 +654,7 @@ def shared_heads(vault, skipped):
             revision = read_json(path)
             if not isinstance(revision, str) or not HEX.fullmatch(revision):
                 raise ValueError("Invalid device head")
-            data = (vault / "versions" / tid / (revision + ".json")).read_bytes()
-            if digest(data) != revision:
-                raise ValueError("Invalid snapshot checksum")
-            man = valid_manifest(json.loads(data), tid)
-            result.setdefault(tid, {})[path.parent.name] = man
+            result.setdefault(tid, {})[path.parent.name] = read_version(vault, tid, revision)
         except (OSError, ValueError, TypeError) as exc:
             skipped[tid] = "Waiting for a complete device snapshot: " + str(exc)
     return result
@@ -595,7 +665,10 @@ def publish(vault, device, man):
     key = digest(data)
     path = vault / "versions" / man["id"] / (key + ".json")
     if not path.exists():
-        atomic(path, data)
+        import vault_crypto
+
+        secret = vault_crypto.writing_key()
+        atomic(path, vault_crypto.seal(secret, b"revision:" + bytes.fromhex(key), data) if secret else data)
     head = vault / "heads" / device / (man["id"] + ".json")
     if read_json(head) != key:
         atomic(head, encode(key))

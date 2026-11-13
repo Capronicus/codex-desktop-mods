@@ -67,15 +67,15 @@ def compact(apply=False):
             # A revision that stays must keep its blocks, even with no head yet.
             recent += 1
             try:
-                keep.update(sync.valid_manifest(sync.read_json(path), tid)["chunks"])
+                keep.update(sync.read_version(vault, tid, revision)["chunks"])
             except (OSError, ValueError, TypeError):
                 pass
         blocks = []
         # Blocks carry no chat ID. While any head is incomplete its blocks are unknown,
         # so only revisions of complete chats are removed in that pass.
-        for path in () if waiting else (vault / "blocks").glob("*/*.gz"):
-            key = path.name[:-3]
-            if not sync.HEX.fullmatch(key) or path.parent.name != key[:2] or key in keep:
+        for path in () if waiting else (vault / "blocks").glob("*/*"):
+            key = path.stem
+            if path.suffix not in (".gz", ".enc") or not sync.HEX.fullmatch(key) or path.parent.name != key[:2] or key in keep:
                 continue
             if settled(path, now):
                 blocks.append(path)
