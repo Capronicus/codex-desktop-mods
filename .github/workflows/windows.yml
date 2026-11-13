@@ -12,6 +12,8 @@ on:
       - 'chat-details-*.cjs'
       - 'manager.py'
       - 'server.py'
+      - 'compatibility.py'
+      - 'tools/**'
       - 'tests/**'
       - '.github/workflows/windows.yml'
   push:
@@ -34,6 +36,10 @@ jobs:
           python-version: '3.12'
       - name: Check the installer and native Start menu shortcut
         run: python tests/test_windows.py
+      - name: Check the catalogue report and recorded renderer modules
+        run: |
+          python tests/catalogue_report.py
+          python tests/renderer_fixtures.py
       - name: Install the official ChatGPT desktop package
         shell: powershell
         run: |
