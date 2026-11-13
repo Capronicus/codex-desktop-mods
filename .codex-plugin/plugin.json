@@ -1,6 +1,6 @@
 {
   "name": "codex-desktop-mods",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "description": "Manage the Codex Desktop Mods patch for the Windows and Linux ChatGPT desktop apps.",
   "author": {
     "name": "Capronicus"

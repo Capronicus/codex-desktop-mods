@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
+import subprocess
 import time
 import uuid
 
@@ -185,6 +186,28 @@ def messages(rows):
             yield {"turn": p.get("turn_id") or turn, "item": p.get("id"), "role": p["role"], "text": text}
 
 
+def outline(thread):
+    import bookmarks
+    checked_id(thread)
+    marks = [b for b in bookmarks.list_marks() if b.get("thread")==thread and not b.get("cloud")]
+    by_turn = {}
+    for mark in marks:
+        by_turn.setdefault(mark.get("turn"), []).append(mark)
+    rows = []
+    reference = re.compile(r"\[[^\]\n]*\]\((?:file:|/|[A-Za-z]:[/\\]|\.{1,2}/|[^ )]+[.][a-zA-Z0-9]{1,8}(?:[#:)]))|(?:^|[\s\x60])(?:[\w.-]+[/\\])+[\w.-]+\.\w+")
+    with sync.open_rollout(local_source(thread)) as stream:
+        for msg in messages(records(stream)):
+            turn = msg["turn"]
+            if not projects.valid_id(turn): continue
+            prompt = msg["role"]=="user"
+            if prompt or reference.search(msg["text"]):
+                rows.append({"kind":"Prompt" if prompt else "Files", "label":" ".join(msg["text"].split())[:140],
+                             "thread":thread,"turn":turn,"item":msg.get("item") or "","role":msg["role"]})
+            for mark in by_turn.pop(turn, []):
+                rows.append({"kind":"Bookmark","label":mark["label"],"bookmark":mark["id"]})
+    return rows
+
+
 def reply(thread, turn, item=""):
     checked_id(turn)
     last = None
@@ -223,6 +246,27 @@ def fingerprint(file):
     return exact.hexdigest(), portable.hexdigest() if text else None
 
 
+def checkout_context(file, relative):
+    # Stop discovery at the linked checkout even if its parent is itself a Git repository.
+    root = file.parents[len(PurePosixPath(relative).parts)-1]
+    env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(root.parent), "GIT_OPTIONAL_LOCKS": "0"}
+    def git(*args):
+        result = subprocess.run(["git", "-c", "core.fsmonitor=false", "--no-optional-locks", "-C", str(root), *args],
+                                env=env, capture_output=True, timeout=3)
+        return result.stdout.decode("utf-8", "replace").strip() if result.returncode==0 else None
+    try:
+        head = git("rev-parse", "--short=12", "HEAD")
+        branch = git("symbolic-ref", "--quiet", "--short", "HEAD")
+        if not head and not branch: return None
+        status = git("status", "--porcelain=v1", "--untracked-files=normal", "--", ":(literal)"+relative)
+        changes = git("status","--porcelain=v1","--untracked-files=normal")
+        dirty = bool(changes) if changes is not None else None
+        return {"branch": (branch or "Detached HEAD")[:200], "commit": head or "", "dirty":dirty,
+                "fileDirty": bool(status) if status is not None else None}
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def handoff(thread, turn, device, request, note="", item="", reference=""):
     for ident in (thread, turn, device, request):
         checked_id(ident)
@@ -245,7 +289,10 @@ def handoff(thread, turn, device, request, note="", item="", reference=""):
             raise ValueError("This handoff was already sent.")
         if not old:
             if reference:
-                obj["sha256"], portable = fingerprint(resolve_file(thread,reference))
+                file = resolve_file(thread,reference)
+                obj["sha256"], portable = fingerprint(file)
+                git = checkout_context(file, obj["file"])
+                if git: obj["git"] = git
                 if portable: obj["text_sha256"] = portable
             sync.atomic(path, sync.encode({**obj, "created": int(time.time())}))
         return {"sent": True}
@@ -305,12 +352,15 @@ def compare_handoff_file(sender, request):
     if not isinstance(reference,str) or not isinstance(digest,str) or not sync.HEX.fullmatch(digest):
         raise ValueError("This handoff has no file fingerprint.")
     local = resolve_file(obj["thread"], reference, allow_missing=True)
+    git = {}
+    if isinstance(obj.get("git"), dict):
+        git = {"senderGit": obj["git"], "localGit": checkout_context(local, reference)}
     if not local.is_file():
-        return {"status":"Missing here","reference":reference}
+        return {"status":"Missing here","reference":reference, **git}
     exact, portable = fingerprint(local)
     # Git can check the same text out with different line endings on Windows and Linux.
     same = exact == digest or (portable is not None and portable in (digest, obj.get("text_sha256")))
-    return {"status":"Same version" if same else "Changed here","reference":reference}
+    return {"status":"Same version" if same else "Changed here","reference":reference, **git}
 
 
 def dismiss(sender, request):
@@ -404,7 +454,7 @@ def desktop_context():
     doc = sync.read_json(sync.STATE / "desktop-request.json", {})
     if not isinstance(doc.get("at"), (int, float)) or not 0 <= time.time() - doc["at"] / 1000 < 600:
         return {}
-    if doc.get("action") == "new-bookmark":
+    if doc.get("action") in ("new-bookmark", "move-chats"):
         from bookmarks import account_id
         if doc.get("account") != account_id(): return {}
     return doc
@@ -439,7 +489,8 @@ def dashboard():
     return result
 
 
-def desktop_command(action, thread="", turn="", item=""):
+def desktop_command(action, thread="", turn="", item="", role=""):
+    if role not in ("", "assistant", "user"): raise ValueError("Unknown message role.")
     if action not in ("measure", "navigate") or (action == "navigate" and not projects.valid_id(thread)):
         raise ValueError("Unknown desktop action.")
     if turn:
@@ -447,7 +498,7 @@ def desktop_command(action, thread="", turn="", item=""):
     if len(item) > 160:
         raise ValueError("Invalid reply identifier.")
     doc = {"action": action, "id": str(uuid.uuid4()), "thread": thread, "turn": turn,
-           "item": item, "at": int(time.time()*1000)}
+           "item": item, "role": role, "at": int(time.time()*1000)}
     sync.atomic(sync.STATE / "desktop-command.json", sync.encode(doc))
     return {"requested": action}
 

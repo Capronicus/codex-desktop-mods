@@ -517,6 +517,13 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
     if (!read('chat',stable)) edits.push(['chat/' + stable,old]);
     await write(edits).catch(() => {});
   }
+  function moveItems(keys) {
+    if (!window.localChatDetails?.openModControls || !keys.length || keys.length>500) return [];
+    const chats = keys.map(key => typeof key==='string' && /^(?:codex:thread:)?local:([a-f0-9-]{36})$/i.exec(key)?.[1]);
+    if (!chats.every(Boolean)) return [];
+    return [{id:'mod-move-chats',message:{id:'local.sidebar.moveChats',defaultMessage:'Move to…'},selectAfterClose:true,
+      onSelect:()=>window.localChatDetails.openModControls({action:'move-chats',chats:[...new Set(chats)]})}];
+  }
   function actionItems(kind,key,linkedLocalId) {
     if (!window.localChatDetails?.openModControls || typeof key!=='string') return [];
     const project=kind==='project';
@@ -528,11 +535,11 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
       selectAfterClose:true,onSelect:()=>window.localChatDetails.openModControls({action:'create-subsection',project:id})
     },{id:'project-organize',message:{id:'local.sidebarGroups.project',defaultMessage:'Organize project…'},
       onSelect:()=>window.localChatDetails.openModControls({action:'organize',project:id})}]:[];
-    return [...organize,{id:'chat-sync-'+kind,message:{id:'local.chatActions.'+kind,
+    return [...(project?[]:moveItems([key])),...organize,{id:'chat-sync-'+kind,message:{id:'local.chatActions.'+kind,
       defaultMessage:project?'Project sharing…':'Chat branches…'},
       onSelect:()=>window.localChatDetails.openModControls(project?{action:'project',project:id}:{action:'family',thread:id})}];
   }
-  return {menuItem, actionItems, migrate, activityDay};
+  return {menuItem, actionItems, moveItems, migrate, activityDay};
 }
 
 // Paint the relationship in the row gutter without changing native order or hit targets.
@@ -631,6 +638,9 @@ function installDeliveryStatus() {
   if (!read) return;
   const style=document.createElement('style');
   style.textContent=`
+    [data-csc-chat-tools]{display:flex;gap:.6em;margin:2px 4px}
+    [data-csc-chat-tools] button{color:var(--color-text-secondary,GrayText);font:12px/1.6 system-ui;cursor:pointer}
+    [data-csc-chat-tools] button:hover{text-decoration:underline}
     [data-csc-chat-label][data-origin-emoji]::before {content:attr(data-origin-emoji) ' ';font:1em system-ui}
     [data-csc-origin-caption]::before {content:attr(data-csc-origin-caption);display:block;font:12px/1.5 system-ui;
       color:var(--color-text-secondary,GrayText);padding:2px 4px}
@@ -670,6 +680,9 @@ function installDeliveryStatus() {
         if (id){if (!rows.has(id)) rows.set(id,[]);rows.get(id).push(row);}
       }
       const views=openChats();
+      for(const bar of document.querySelectorAll('[data-csc-chat-tools]')){
+        if(views.get(bar.parentNode)!==bar.dataset.cscChatTools)bar.remove();
+      }
       for(const node of document.querySelectorAll('[data-csc-origin-owner]')){
         if(views.get(node)!==node.dataset.cscOriginOwner){
           delete node.dataset.cscOriginCaption;delete node.dataset.cscOriginOwner;
@@ -680,6 +693,26 @@ function installDeliveryStatus() {
         const batch=ids.slice(n,n+128), records=await read(batch);
         for(const [node,id] of views){
           if(!batch.includes(id) || !node.isConnected || again)continue;
+          let tools=node.querySelector(':scope > [data-csc-chat-tools]');
+          if(!tools){
+            tools=document.createElement('div');tools.dataset.cscChatTools=id;
+            const outline=document.createElement('button');outline.type='button';outline.textContent='Chat outline';
+            outline.onclick=()=>window.localChatDetails.openModControls({action:'outline',thread:id});
+            tools.append(outline);node.prepend(tools);
+          }
+          const record=records[id], positions=record?.reading || [];
+          tools.dataset.readingEnabled=String(!!record?.readingEnabled);
+          const key=JSON.stringify(positions);
+          if(tools.dataset.positions!==key){
+            tools.dataset.positions=key;
+            for(const b of tools.querySelectorAll('[data-resume]'))b.remove();
+            for(const cursor of positions){
+              const button=document.createElement('button');button.type='button';button.dataset.resume='';
+              button.textContent='Resume from '+cursor.name;
+              button.onclick=()=>window.dispatchEvent(new CustomEvent('csc-resume',{detail:{...cursor,thread:id}}));
+              tools.append(button);
+            }
+          }
           const o=records[id]?.origin;
           if(o?.emoji && ['started','first_seen'].includes(o.basis)){
             node.dataset.cscOriginOwner=id;
@@ -748,13 +781,18 @@ function installChatActions() {
     event.preventDefault();event.stopPropagation();
     try {
       const items=reply?[{id:'handoff',label:'Hand off this reply…'},{id:'file',label:'Open local copy…'}]:[];
+      if(marker?.dataset.cscOriginThread)items.push({id:'outline',label:'Chat outline…'});
       if(bookmark)items.push({id:'bookmark',label:words?'Bookmark selection…':'Bookmark message…'});
-      if(words)items.push({id:'animate',label:words.label});
+      if(words)items.push({id:'animate',label:words.label},{id:'gold',label:'Gold shimmer'},{id:'rainbow',label:'Fabulous rainbow'});
+      if(words||bookmark)items.push({id:'phrase-rules',label:'Text effect rules…'});
       if(selected)items.push({id:'copy',label:'Copy selection'});
       items.push({id:'select',label:'Select all'});
       const choice=await window.electronBridge.showContextMenu(items);
+      if(choice?.id==='outline')await api.openModControls({action:'outline',thread:marker.dataset.cscOriginThread});
       if(choice?.id==='bookmark')await api.openModControls(bookmark);
       if(choice?.id==='animate')words?.apply();
+      if(choice?.id==='gold'||choice?.id==='rainbow')words?.apply(choice.id);
+      if(choice?.id==='phrase-rules')wordAnimations?.manageRules(words?.excerpt||'');
       if(choice?.id==='copy')await navigator.clipboard.writeText(selected);
       if(choice?.id==='select')document.execCommand('selectAll');
       if(choice?.id==='file' || choice?.id==='handoff')await api.openModControls({...args,action:choice.id,reference:choice.id==='file'||fileRef?ref:''});
@@ -787,11 +825,14 @@ function installChatActions() {
         }
         continue;
       }
-      const rows=[...pane.querySelectorAll(markerSelector)].filter(m=>m.dataset.cscReplyTurn===turn && m.dataset.cscReplyRole!=='user');
+      const user=command.role==='user';
+      const rows=[...pane.querySelectorAll(markerSelector)].filter(m=>m.dataset.cscReplyTurn===turn &&
+        (m.dataset.cscReplyRole==='turn'||m.dataset.cscReplyRole===(user?'user':'assistant')));
       const nativeItem=item && rows.map(m=>m.closest('[data-turn-key]')?.querySelector(
         '[data-response-annotation-target="'+CSS.escape(item)+'"]')).find(Boolean);
       const match=item ? rows.find(m=>m.dataset.cscReplyItem===item) : rows.at(-1);
-      const row=nativeItem || match?.closest('[data-turn-key]');
+      const row=(user && rows[0]?.closest('[data-turn-key]')?.querySelector('[data-user-message-bubble]')) ||
+        nativeItem || match?.closest('[data-turn-key]') || (user && rows[0]?.closest('[data-turn-key]'));
       if(row && !command.anchor){row.scrollIntoView({block:'center',behavior:'instant'});
         row.animate?.([{outline:'2px solid Highlight'},{outline:'2px solid transparent'}],{duration:1600});return;}
       // The native rail can jump directly even if the turn has not mounted.
@@ -808,6 +849,26 @@ function installChatActions() {
     }
     if(currentJump===command.id) notice(command.anchor?'The bookmarked message could not be located in this chat.':'The reply is available under Reply handoffs in Mod Controls.');
   }
+  window.addEventListener('csc-resume',event=>{
+    const cursor=event.detail;
+    if(cursor?.turn && cursor.thread)navigate({...cursor,action:'navigate',id:crypto.randomUUID()}).catch(e=>notice(e.message));
+  });
+  // Read the viewport after scrolling settles. Virtualized rows can be recycled between scrolls.
+  function recordPosition(event){
+    if(document.hidden || !api.saveReading)return;
+    const scroller=event.target;
+    if(!scroller.matches?.('[data-app-action-timeline-scroll]'))return;
+    const pane=scroller.querySelector('[data-csc-active-thread]'),thread=pane?.dataset.cscActiveThread;
+    if(!thread || !document.querySelector('[data-csc-chat-tools="'+CSS.escape(thread)+'"][data-reading-enabled="true"]'))return;
+    const bounds=scroller.getBoundingClientRect(), y=bounds.top+Math.min(100,bounds.height/3);
+    const row=[...pane.querySelectorAll('[data-turn-key]')].find(el=>el.getBoundingClientRect().bottom>y);
+    const marker=row?.querySelector(markerSelector);
+    if(marker?.dataset.cscOriginThread!==thread)return;
+    const user=row.querySelector('[data-user-message-bubble]');
+    const role=marker.dataset.cscReplyRole==='user'||(user && user.getBoundingClientRect().bottom>y)?'user':'assistant';
+    api.saveReading({thread,turn:marker.dataset.cscReplyTurn,role,item:marker.dataset.cscReplyItem||''}).catch(()=>{});
+  }
+  document.addEventListener('scrollend',recordPosition,true);
   function measure() {
     if(measuring)return;
     measuring=true;

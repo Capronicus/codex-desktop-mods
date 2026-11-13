@@ -75,6 +75,32 @@ async function run() {
       return {thread:mark.thread,found:engine.jump(document,mark.anchor)};
     });
     assert.deepEqual(cloudMark,{thread:'conversation',found:true});
+    await page.evaluate(()=>{
+      const prompt=document.querySelector('[data-user-message-bubble]'),reply=document.querySelector('[data-response-annotation-target]');
+      prompt.textContent='[[gold|Orbit]]';reply.textContent='[[rainbow|Orbit]] and Stardust';
+      window.electronBridge.showContextMenu=items=>({id:'phrase-rules'});
+      reply.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));
+    });
+    const dialog=page.getByRole('dialog',{name:'Text effects'});
+    await dialog.getByLabel('Exact phrase').fill('Stardust');
+    await dialog.getByLabel('Effect',{exact:true}).selectOption('rainbow');
+    await dialog.getByRole('button',{name:'Save rule'}).click();
+    await dialog.getByRole('button',{name:'Close'}).click();
+    const inks=(effect,selector)=>page.evaluate(([effect,selector])=>[...CSS.highlights.entries()]
+      .filter(([key])=>key.startsWith('csc-'+effect)).flatMap(([,highlight])=>[...highlight])
+      .filter(range=>document.querySelector(selector).contains(range.startContainer)).map(range=>range.toString()).length,[effect,selector]);
+    assert.equal(await inks('gold',user),5);
+    assert.equal(await inks('rainbow',reply),13);
+    assert.equal(await page.locator(reply).textContent(),'[[rainbow|Orbit]] and Stardust');
+    await page.locator(cloud).evaluate(el=>{el.replaceChildren(Object.assign(document.createElement('a'),{href:'#fx-gold',textContent:'Orbit'}));});
+    await page.waitForFunction(()=>[...CSS.highlights.get('csc-gold0')].some(r=>r.startContainer.parentElement.tagName==='A'));
+    assert.equal(await inks('gold',cloud),5);
+    await page.emulateMedia({reducedMotion:'no-preference'});
+    const ink=()=>page.locator(user).evaluate(el=>getComputedStyle(el,'::highlight(csc-gold0)').color);
+    const firstInk=await ink();
+    await page.waitForFunction(first=>getComputedStyle(document.querySelector('[data-user-message-bubble]'),'::highlight(csc-gold0)').color!==first,firstInk);
+    await page.emulateMedia({reducedMotion:'reduce'});
+    assert.equal(await page.locator(user).evaluate(el=>getComputedStyle(el).animationName),'none');
     console.log('Selected occurrence pulses across Markdown, survives reload and row replacement, respects reduced motion and can be removed in local and cloud chats.');
   } finally {await browser.close();}
 }

@@ -163,7 +163,7 @@ def last_folder_check(cfg):
 
 
 def set_exchange_option(option, enabled):
-    if option not in ("colours", "sidebar", "order", "settings", "tree", "marks", "archive") or type(enabled) is not bool:
+    if option not in ("colours", "sidebar", "order", "settings", "tree", "marks", "reading", "archive") or type(enabled) is not bool:
         raise ValueError("Unknown sync option")
     with lock(STATE / "sync.lock"):
         cfg = read_json(CONFIG)

@@ -140,6 +140,60 @@ class ChatActions(unittest.TestCase):
             self.assertEqual(bookmarks.list_marks(),[])
         self.assertFalse(list(self.vault.rglob("*bookmark*")))
 
+    def test_reading_positions_and_build_receipts(self):
+        import delivery
+        head={"chunks":[]}
+        stats={"conflicts":{},"skipped":[]}
+        def exchange(device, reading, private=()):
+            with self.on(device):
+                cfg,_=projects.config();cfg["reading"]=reading
+                delivery.exchange(self.vault,cfg,{self.thread:{self.home:head,self.work:head}},
+                                  set(),set(),stats,{},set(private),{self.thread},{})
+                return sync.read_json(sync.STATE/"delivery.json")
+        with self.on(self.work):
+            import bookmarks
+            account=sync.digest(bookmarks.account_id().encode())
+            sync.atomic(sync.STATE/("reading-"+self.work+"-"+account+".json"),sync.encode(
+                {self.thread:{"turn":self.turn,"role":"user","item":"","at":10}}))
+            sync.atomic(sync.STATE/"running-build.json",sync.encode({"version":"0.16.0","build":"a"*12,"at":int(time.time()*1000)}))
+        exchange(self.work,True)
+        home=exchange(self.home,True)
+        self.assertEqual(home["chats"][self.thread]["reading"][0]["turn"],self.turn)
+        self.assertEqual(home["builds"][0]["build"]["running"],"0.16.0 · "+"a"*12)
+        self.assertEqual(exchange(self.home,False)["chats"][self.thread]["reading"],[])
+        exchange(self.work,True,[self.thread])
+        self.assertEqual(exchange(self.home,True)["chats"][self.thread]["reading"],[])
+        exchange(self.work,False)
+        self.assertNotIn("reading",sync.read_json(self.vault/"receipts-v1"/(self.work+".json")))
+
+
+    def test_outline_and_git_handoff(self):
+        import subprocess
+        self.history(self.work,self.thread,"Try [the file](src/example.py).")
+        request=ident()
+        for device,branch in [(self.home,"home-review"),(self.work,"work-design")]:
+            with self.on(device) as h:
+                root=h/"checkout"
+                def git(*args):
+                    subprocess.run(["git","-C",str(root),*args],check=True,capture_output=True)
+                git("init","-b",branch)
+                (root/"file.txt").write_text("checked in")
+                git("add","file.txt")
+                git("-c","user.name=Fixture","-c","user.email=fixture@example.test","commit","-m","Fixture")
+                if device==self.work:
+                    (root/"file.txt").write_text("work in progress")
+                    actions.handoff(self.thread,self.turn,self.home,request,reference="file.txt")
+                    rows=actions.outline(self.thread)
+                    self.assertEqual([r["kind"] for r in rows],["Prompt","Files"])
+        with self.on(self.home):
+            result=actions.compare_handoff_file(self.work,request)
+            self.assertEqual(result["status"],"Changed here")
+            self.assertEqual(result["senderGit"]["branch"],"work-design")
+            self.assertTrue(result["senderGit"]["fileDirty"])
+            self.assertEqual(result["localGit"]["branch"],"home-review")
+            self.assertFalse(result["localGit"]["fileDirty"])
+
+
     def test_handoff_file_states(self):
         request=ident()
         with self.on(self.work) as h:

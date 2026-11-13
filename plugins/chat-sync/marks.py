@@ -36,7 +36,7 @@ def clean(key, value):
         valid = (len(ident) <= 2048 and isinstance(fields, list) and len(fields) == 4 and text(fields[0], 1024)
                  and all(type(n) is int and n >= 0 for n in fields[1:3]) and fields[2] > fields[1]
                  and text(fields[3], 16))
-        return 1 if valid and value == 1 else None
+        return value if valid and value in (1,"gold","rainbow") else None
     if not projects.valid_id(ident) or not isinstance(value, dict):
         return None
     if kind == "view":
@@ -79,7 +79,7 @@ def observe(account, links):
                 current["view/" + ident] = {**value, "project": value["project"] and links.wire(value["project"])}
         for tag in shown.get("words") or []:
             if isinstance(tag, str) and clean("word/" + tag, 1):
-                current["word/" + tag] = 1
+                current["word/" + tag] = clean("word/"+tag, (shown.get("wordStyles") or {}).get(tag,1)) or 1
     return current, kinds
 
 
@@ -150,7 +150,7 @@ def exchange(cfg, vault):
                 elif key.startswith("view/"):
                     put[key] = {**row[2], "project": row[2]["project"] and links.local(row[2]["project"])}
                 else:
-                    put[key] = 1
+                    put[key] = row[2]
             if put or drop:
                 doc = {"account": account, "set": put, "remove": sorted(drop)}
                 delivery.save(instructions, {**doc, "id": sync.digest(sync.encode(doc))})

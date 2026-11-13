@@ -21,7 +21,7 @@ With Desktop Mods and Chat Sync 0.12.0, right-click a local reply to open a corr
 
 In version 0.15.0, open **Mod Controls → Organize projects and sections** to create a subsection under a project or custom section (up to three levels including the root), change its parent or convert between a custom section and a real local project. Apply queued changes by fully quitting and reopening the app. A converted project remembers its local folder paths.
 
-Select words in a message and right-click for **Animate selected text**. Select marked text for **Remove text animation**. These marks are local to this desktop and follow the reduced-motion preference.
+Both the user and the assistant can style an arbitrary phrase with `[any phrase](#fx-gold)`, `[any phrase](#fx-rainbow)` or `[any phrase](#fx-pulse)`. Only add effects when requested. In a plain-text message, `[[gold|any phrase]]` also works. Use **Text effect rules…** to apply a literal phrase rule on this desktop. Select words in a message and right-click for **Animate selected text**. Select marked text for **Remove text animation**. These marks are local to this desktop and follow the reduced-motion preference.
 
 Use **Add to batch** in the organizer to preview a series of creations and moves before applying it on quit. Enable **Subsection tree** separately on both desktops to share nesting. File handoffs can include a relative path and fingerprint for comparison. Right-click a message or selection to bookmark it. Open bookmarks from the pet. Saved views in the sidebar filter local chats by project, origin, age and outstanding receipt. Bookmarks and saved views are local.
 

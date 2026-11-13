@@ -243,6 +243,29 @@ async function run() {
     const job=JSON.parse(await fs.readFile(path.join(stateDir,'sidebar-group-change.json')));
     assert.equal(job.parent,linked);
     assert.equal(job.action,'create');
+    await fs.unlink(path.join(stateDir,'sidebar-group-change.json'));
+    const chat2=crypto.randomUUID();
+    const db2=new DatabaseSync(path.join(home,'state_5.sqlite'));
+    db2.prepare('UPDATE threads SET archived=0 WHERE id=?').run(tid);
+    db2.prepare("INSERT INTO threads(id,source,archived,name) VALUES(?,'cli',0,'Second chat')").run(chat2);
+    db2.close();
+    const leaf=crypto.randomUUID();
+    const atoms=state['electron-persisted-atom-state']||={};
+    atoms['sidebar-custom-sections-v3']={fixture:{sections:[{id:section,name:'Elysium'},{id:leaf,name:'Seurat'}]}};
+    state['codex-mods-sidebar-groups-v1'].fixture.parents[leaf]='custom:'+section;
+    await fs.writeFile(layoutFile,JSON.stringify(state));
+    await sidebar.evaluate(async ids=>{
+      const menus=createSidebarColours({preferencesReady:async()=>{},getPreference:()=>null,preferenceKeys:()=>[],watchPreferencePrefix:()=>{}});
+      await menus.moveItems(ids.map(id=>'local:'+id))[0].onSelect();
+    },[tid,chat2]);
+    await panel.getByRole('button',{name:'Refresh chat actions'}).click();
+    await panel.getByLabel('Search projects and subsections').fill('seur');
+    await panel.getByRole('option',{name:'Tartarus › Elysium › Seurat'}).waitFor();
+    await panel.getByRole('button',{name:'Preview move'}).click();
+    await panel.getByRole('button',{name:'Apply batch on quit'}).click();
+    await panel.getByText(/Queued:/).waitFor();
+    const moved=JSON.parse(await fs.readFile(path.join(stateDir,'sidebar-group-change.json')));
+    assert.deepEqual(moved.chats,[tid,chat2]);assert.equal(moved.parent,'custom:'+leaf);
     console.log('Passed outgoing search and exclusions while paused, sidebar review and undo, sync controls and narrow layout in Chromium.');
   } finally {
     child.stdin.end();

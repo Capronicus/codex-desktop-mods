@@ -68,6 +68,8 @@ def modify(js):
                'icon:d0.edit,message:f0.edit,onSelect:a},sidebarColours.menuItem("project",cscProject),...sidebarColours.actionItems("project",cscProject),...m.length')
     js = subst(js, 'selectedThreadKeys:i,threadKey:a}){if(i.length<2)return t;',
                'selectedThreadKeys:i,threadKey:a}){if(i.length<2)return [sidebarColours.menuItem("chat",a),...sidebarColours.actionItems("chat",a),...t];')
+    js = re.sub(r'(selectedThreadKeys:i,threadKey:a\}\)\{if\(i.length<2.{1,4500}?\.flatMap\(.{1,4500}?\}\)),(\w+)=t\.find',
+                r'\1.concat(sidebarColours.moveItems(i)),\2=t.find', js, count=1)
     # Carry the native last-update timestamps through the local, remote task and
     # pending row adapters. Updating the colour never writes to a chat's history.
     for fields, timestamp in [
@@ -261,6 +263,15 @@ def valid_runtime(target):
             and (target / 'resources/app.asar').is_file())
 
 
+def build_info():
+    # This identifier is the same for a given patch on Linux and Windows.
+    source = hashlib.sha256()
+    for name in MOD_FILES:
+        source.update(name.encode() + b'\0')
+        source.update((SOURCE / name).read_bytes().replace(b'\r\n', b'\n'))
+    return {'version': '0.16.0', 'build': source.hexdigest()[:12]}
+
+
 def revision_for(before):
     return digest(b''.join((SOURCE / name).read_bytes() for name in MOD_FILES)
                   + repr(before).encode())[:16]
@@ -288,6 +299,7 @@ def runtime_for(before):
             if item.name != 'app.asar':
                 (resources / item.name).symlink_to(item)
         patch_archive(resources / 'app.asar')
+        (resources / 'codex-mod-build.json').write_text(json.dumps(build_info()), encoding='utf-8')
         if before != signature():
             raise ValueError('The desktop package changed while rebuilding the mods. Try again after the update finishes.')
         target = CACHE / ('runtime-' + revision + '-' + Path(tmp).name)
@@ -328,6 +340,7 @@ def prune_runtimes(keep):
 
 def save_runtime(target, before):
     previous = read_state('runtime.json').get('path')
+    atomic_write(INSTALL / 'build-ready.json', json.dumps(build_info()).encode())
     atomic_write(INSTALL / 'runtime.json', json.dumps({'path': str(target), 'system': before}).encode())
     (INSTALL / 'unsupported.json').unlink(missing_ok=True)
     prune_runtimes({target, Path(previous) if isinstance(previous, str) else None})

@@ -140,6 +140,7 @@ def runtime(app, version, root):
         shutil.copytree(app, stage, copy_function=shutil.copyfile, ignore=skip)
         original = app / ASAR
         patcher.patch_archive(stage / ASAR, archive=original)
+        (stage / "resources/codex-mod-build.json").write_text(json.dumps(patcher.build_info()), encoding="utf-8")
         set_integrity(stage / EXE, asar_hash(original), asar_hash(stage / ASAR))
         if key != revision(app, version, tool_version()):
             raise ValueError('Windows updated ChatGPT during installation. Retry the operation.')
@@ -293,6 +294,7 @@ def apply():
         dest = runtime(*pkg, root)
         tools = install_tools(root)
         save_shortcut(root, tools, pkg[0] / EXE)
+        patcher.atomic_write(root / "build-ready.json", json.dumps(patcher.build_info()).encode())
         prune_unused(root, dest)
     return 'Installed. Fully quit ChatGPT, then open ChatGPT (Desktop Mods) from Start.'
 

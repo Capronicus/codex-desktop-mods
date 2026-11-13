@@ -24,6 +24,7 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 <p id="notice" role="status" aria-live="polite">Connecting to Chat Sync…</p>
 <section><h2>Chat sync</h2><p id="overview"></p><p id="setup" hidden>To connect this desktop, ask Chat Sync to use a private folder you choose.</p>
 <dl id="health"></dl><p id="delivery"></p><ul id="peers" hidden></ul>
+<details><summary>Desktop builds</summary><ul id="desktop-builds"></ul></details>
 <details id="device-settings" hidden><summary>Device name and emoji</summary>
 <div id="device-form"><label>Device name<input id="device-name" required maxlength="60" autocomplete="off"></label>
 <label>Origin emoji<input id="emoji" list="device-emojis" placeholder="Optional" autocomplete="off"></label>
@@ -45,6 +46,7 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 <details id="file-copy"><summary>Open local copy</summary><p id="file-hint"></p><label>File in linked project <input id="file-reference" maxlength="4096"></label> <button id="file-open">Open local copy</button></details>
 <details id="send-handoff"><summary>Hand off a reply</summary><p id="send-hint"></p>
 <label>Send to <select id="handoff-device"></select></label> <label>File to compare (optional) <input id="handoff-file" maxlength="4096" placeholder="Path in the linked checkout"></label> <label>Optional note <input id="handoff-note" maxlength="500"></label> <button id="handoff-send">Send handoff</button></details>
+<details id="outline"><summary>Chat outline</summary><input type="search" aria-label="Filter outline" id="outline-filter" placeholder="Filter outline"><ul id="outline-list"></ul></details>
 <details id="bookmarks"><summary>Bookmarks</summary><div id="bookmark-new" hidden><label>Bookmark name <input id="bookmark-name" maxlength="160"></label> <button id="bookmark-save">Save bookmark</button></div><ul id="bookmark-list"></ul></details>
 <details id="handoff-inbox"><summary>Reply handoffs</summary><ul id="inbox-list"></ul></details>
 <details id="branches"><summary>Chat branches</summary><p id="family-hint"></p><button id="family-show">Show parent and branches</button></details>
@@ -56,6 +58,10 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 <details id="performance"><summary>Desktop responsiveness</summary><button id="perf-start">Check responsiveness</button><p id="perf-result"></p></details>
 <div id="action-content" aria-live="polite"></div><button id="actions-refresh">Refresh chat actions</button>
 </details></section>
+<section id="quick-move" hidden><h2>Move chats</h2><p id="move-count"></p>
+<label>Search projects and subsections <input type="search" id="move-query" autocomplete="off"></label>
+<label>Destination <select id="move-target" size="5"></select></label>
+<button id="move-preview">Preview move</button> <p id="move-feedback" role="status"></p></section>
 <section><details id="group-editor"><summary>Organize projects and sections</summary>
 <p>Groups can be three levels deep, including the project or top-level section. Changes apply on this PC after you fully quit the desktop app.</p>
 <p><label>Action <select id="group-action"><option value="create">Create subsection</option><option value="move">Move section</option><option value="assign">Move chats</option><option value="promote">Convert section to project</option><option value="demote">Convert project to section</option></select></label></p>
@@ -89,7 +95,7 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 'use strict';
 const el = id => document.getElementById(id);
 const features = {wideChat:'Wider chats',petDock:'Pet in the chat margin',petMotion:'Pet runs while scrolling',timestamps:'Message timestamps',tokens:'Turn and chat token counts',branchLines:'Lines between branched chats'};
-const options = {colours:['Colours and saved swatches','set_colour_sync'],settings:['Appearance and chat preferences','set_settings_sync'],sidebar:['Projects and sections','set_sidebar_sync'],tree:['Subsection tree','set_tree_sync'],order:['Pins and order','set_pin_order_sync'],marks:['Bookmarks, saved views and text animations','set_marks_sync'],archive:['Archived chats','set_archive_sync'],encrypted:['Encrypt chat histories in the folder','set_folder_encryption']};
+const options = {reading:['Reading positions across devices','set_reading_sync'],colours:['Colours and saved swatches','set_colour_sync'],settings:['Appearance and chat preferences','set_settings_sync'],sidebar:['Projects and sections','set_sidebar_sync'],tree:['Subsection tree','set_tree_sync'],order:['Pins and order','set_pin_order_sync'],marks:['Bookmarks, saved views and text animations','set_marks_sync'],archive:['Archived chats','set_archive_sync'],encrypted:['Encrypt chat histories in the folder','set_folder_encryption']};
 const pending = new Map();
 let seq = 0, state, working = true;
 let preview=null, visibleChanges=25;
@@ -260,6 +266,14 @@ function render(){
   el('refresh').disabled=working;
   if(!state) return;
   const s=state,h=s.health,r=s.receipts;
+  const builds=el('desktop-builds');
+  builds.replaceChildren();
+  for(const device of [{name:s.device || 'This PC',build:s.build},...(s.peerBuilds || [])]){
+    const row=document.createElement('li'), build=device.build || {};
+    row.textContent=device.name+' · Running: '+(build.running || 'unreported')+' · Ready on launch: '+(build.ready || 'unreported')+
+      (device.seen?' · Last reported '+new Date(device.seen*1000).toLocaleString():'');
+    builds.append(row);
+  }
   renderOutgoing(s);
   renderSidebar(s);
   renderSettings(s);
@@ -376,7 +390,7 @@ el('undo-sidebar').onclick=()=>act('undo_sidebar_batch',{batch:state.sidebarRevi
   result.undo_on_quit?'Fully quit the app to finish undoing the last sidebar batch.':'Sidebar restored. Project, section and order sync are off on this desktop.');
 async function connect(){
   try{
-    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.15.1'},appCapabilities:{},protocolVersion:'2026-01-26'});
+    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.16.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
     theme(host.hostContext);send({method:'ui/notifications/initialized',params:{}});
     new ResizeObserver(()=>send({method:'ui/notifications/size-changed',params:{height:document.querySelector('main').offsetHeight}})).observe(document.querySelector('main'));
     working=false;await act();if(typeof loadActions==='function')await loadActions();

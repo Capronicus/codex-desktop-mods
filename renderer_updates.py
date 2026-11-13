@@ -134,8 +134,11 @@ def adapt(role, source, files, pet_assets):
                        lambda m: f'{memo}[16]!==t||{memo}[{slots}]!==cscId){{{m[1]}{memo}[{slots}]=cscId;'
                        f'if(n=[...cscId?[csc.menuItem("project",cscId)]:[],...csc.actionItems("project",cscId??cscLinked,cscLinked),{{id:{m[2]},message:V')
     elif role == 'chatmenu':
+        selection = find(r'selectedThreadKeys:(\w+),threadKey:', body)[1]
         body = replace(body,r'(selectedThreadKeys:(\w+),threadKey:(\w+)\}\)\{if\(\2.length<2\)return )t;',
                        r'\1[csc.menuItem("chat",\3),...csc.actionItems("chat",\3),...t];')
+        body = replace(body, r'\}\),(\w+)=t\.find', lambda m:
+                       '}).concat(csc.moveItems('+selection+')),'+m[1]+'=t.find')
     elif role == 'cloudmenu':
         body = replace(body,r'id:"organization",items:(\w+)\},\{id:"continue"',
                        r'id:"organization",items:t.surface==="sidebar"&&t.conversationId?[csc.menuItem("chat","chatgpt:conversation:"+t.conversationId),...\1]:\1},{id:"continue"')
