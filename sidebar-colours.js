@@ -185,8 +185,9 @@ function createSidebarColours({preferencesReady, getPreference, setPreference, p
       if (!id || !hex.test(value)) continue;
       if (kind === 'section') {
         const group = attr(sectionAttr, 'custom:' + id);
-        sectionRules.push(group + ' ' + sectionToggle + '{color:' + value + ' !important}');
-        const members = [group + ' :where([' + threadAttr + '])', ...(linked.section.get(id) || [])];
+        const direct = ':not(:where(' + group + ' [data-csc-subsection] *))';
+        sectionRules.push(group + ' ' + sectionToggle + direct + '{color:' + value + ' !important}');
+        const members = [group + ' :where([' + threadAttr + '])' + direct, ...(linked.section.get(id) || [])];
         for (const raw of records.find(section => section.id === id)?.itemKeys || []) {
           const chat = sectionChatKey(raw);
           if (chat) members.push(attr(rawThreadAttr,chat), attr(threadAttr,chat));
@@ -706,6 +707,7 @@ function installChatActions() {
   const api = window.localChatDetails;
   if (!api?.listenActions || window.__cscChatActions) return;
   window.__cscChatActions = true;
+  const wordAnimations = typeof cscWordAnimations === 'function' ? cscWordAnimations() : null;
   const markerSelector = '[data-csc-origin-thread][data-csc-reply-turn]';
   function notice(text) {
     let box=document.getElementById('csc-action-notice');
@@ -722,25 +724,29 @@ function installChatActions() {
     const target=event.target.closest?.('[data-turn-key]');
     const marker=target?.querySelector(markerSelector);
     const fileRef=event.target.closest?.('[data-file-reference]');
-    if(!marker || marker.dataset.cscReplyRole==='user' || event.target.closest('input,textarea,[contenteditable=true]') ||
-       (event.target.closest('button') && !fileRef))return;
-    const selected=String(window.getSelection()||'').trim();
+    if(event.target.closest('input,textarea,[contenteditable=true]') || (event.target.closest('button') && !fileRef))return;
+    const words=wordAnimations?.capture(event.target);
+    const nativeReply=event.target.closest('[data-response-annotation-target]');
+    const reply=marker && marker.dataset.cscReplyRole!=='user' && (marker.dataset.cscReplyRole!=='turn' || nativeReply ||
+      event.target.closest('[data-local-conversation-final-assistant],[data-local-chat-detail="assistant"],[data-markdown-text-style="assistant-message"]'));
+    if(!reply && !words)return;
+    const selected=String(window.getSelection()||'');
     const anchor=event.target.closest('a,code');
-    let ref=selected || fileRef?.getAttribute('data-markdown-copy-text') || anchor?.getAttribute('href') || anchor?.textContent || '';
+    let ref=selected.trim() || fileRef?.getAttribute('data-markdown-copy-text') || anchor?.getAttribute('href') || anchor?.textContent || '';
     if(ref.startsWith('file:///')) {
       try{ref=decodeURIComponent(new URL(ref).pathname).replace(/^\/(?=[a-z]:\/)/i,'');}catch{ref='';}
     }
     if(ref.length>4096 || /[\r\n]/.test(ref))ref='';
-    const nativeReply=event.target.closest('[data-response-annotation-target]');
-    if(marker.dataset.cscReplyRole==='turn' && !nativeReply && !event.target.closest('[data-local-conversation-final-assistant],[data-local-chat-detail="assistant"],[data-markdown-text-style="assistant-message"]'))return;
-    const args={thread:marker.dataset.cscOriginThread,turn:marker.dataset.cscReplyTurn,
+    const args=reply && {thread:marker.dataset.cscOriginThread,turn:marker.dataset.cscReplyTurn,
       item:nativeReply?.dataset.responseAnnotationTarget || marker.dataset.cscReplyItem || ''};
     event.preventDefault();event.stopPropagation();
     try {
-      const items=[{id:'handoff',label:'Hand off this reply…'},{id:'file',label:'Open local copy…'}];
+      const items=reply?[{id:'handoff',label:'Hand off this reply…'},{id:'file',label:'Open local copy…'}]:[];
+      if(words)items.push({id:'animate',label:words.label});
       if(selected)items.push({id:'copy',label:'Copy selection'});
       items.push({id:'select',label:'Select all'});
       const choice=await window.electronBridge.showContextMenu(items);
+      if(choice?.id==='animate')words?.apply();
       if(choice?.id==='copy')await navigator.clipboard.writeText(selected);
       if(choice?.id==='select')document.execCommand('selectAll');
       if(choice?.id==='file' || choice?.id==='handoff')await api.openModControls({...args,action:choice.id,reference:choice.id==='file'?ref:''});

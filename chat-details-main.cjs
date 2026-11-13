@@ -376,10 +376,16 @@
     const parents = {};
     if (primaryFrame(event)) try {
       const data = JSON.parse(require('node:fs').readFileSync(path.join(home,'.codex-global-state.json'),'utf8'));
-      const scoped = data['codex-mods-sidebar-groups-v1']?.[colourAccount()]?.parents || {};
+      const account = colourAccount();
+      const scoped = data['codex-mods-sidebar-groups-v1']?.[account]?.parents || {};
+      const sections = new Set((data['electron-persisted-atom-state']?.['sidebar-custom-sections-v3']?.[account]?.sections || []).map(row => row.id));
       const aliases = data['app-server-project-id-by-legacy-project-id-by-host']?.['local:'+home] || {};
-      for (const [section, project] of Object.entries(scoped)) if (idPattern.test(section) && idPattern.test(project))
-        parents[section] = [project,aliases[project]].filter(Boolean);
+      for (const [section, parent] of Object.entries(scoped)) {
+        if (!idPattern.test(section) || typeof parent !== 'string') continue;
+        if (parent.startsWith('custom:') && sections.has(parent.slice(7)) && parent.slice(7) !== section)
+          parents[section] = {section: parent.slice(7)};
+        else if (idPattern.test(parent)) parents[section] = [parent, aliases[parent]].filter(Boolean);
+      }
     } catch { /* A fresh profile has no nested sections. */ }
     event.returnValue = parents;
   });

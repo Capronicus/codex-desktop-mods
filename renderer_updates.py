@@ -18,7 +18,7 @@ def adapt(role, source, files, pet_assets):
     header, body = source.split('{', 1)
     require = header[:-1].split(',')[-1]
     if role == 'prefs':
-        factory = files('sidebar-colours.js')
+        factory = files('chat-word-animation.js') + '\n' + files('sidebar-colours.js')
         return header + '{' + f"""
           {require}.d(t,{{sidebarColours:()=>cscGet}});
           let cscInstance;

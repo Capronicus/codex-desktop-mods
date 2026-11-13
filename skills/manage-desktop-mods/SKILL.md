@@ -19,4 +19,6 @@ If a successful apply returns an `activation_offer`, show its destination and of
 
 With Desktop Mods and Chat Sync 0.12.0, right-click a local reply to open a corresponding file in a linked checkout or hand the reply to a named desktop. The pet menu opens reply handoffs. Right-click a local sidebar chat for its branches or a project for sharing controls. Run the desktop responsiveness check from Mod Controls → Chat actions and sharing.
 
-In version 0.13.0, open **Mod Controls → Organize projects and sections** to create a project subsection, change its parent or convert between a custom section and a real local project. Apply queued changes by fully quitting and reopening the app. A converted project remembers its local folder paths.
+In version 0.14.0, open **Mod Controls → Organize projects and sections** to create a subsection under a project or custom section (up to three levels including the root), change its parent or convert between a custom section and a real local project. Apply queued changes by fully quitting and reopening the app. A converted project remembers its local folder paths.
+
+Select words in a message and right-click for **Animate selected text**. Select marked text for **Remove text animation**. These marks are local to this desktop and follow the reduced-motion preference.

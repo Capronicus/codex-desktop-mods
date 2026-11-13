@@ -56,7 +56,7 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 <div id="action-content" aria-live="polite"></div><button id="actions-refresh">Refresh chat actions</button>
 </details></section>
 <section><details id="group-editor"><summary>Organize projects and sections</summary>
-<p>Changes apply on this PC after you fully quit the desktop app.</p>
+<p>Groups can be three levels deep, including the project or top-level section. Changes apply on this PC after you fully quit the desktop app.</p>
 <p><label>Action <select id="group-action"><option value="create">Create subsection</option><option value="move">Move section</option><option value="promote">Convert section to project</option><option value="demote">Convert project to section</option></select></label></p>
 <p id="group-source-row"><label>Group <select id="group-source"></select></label></p>
 <p id="group-parent-row"><label>Place in <select id="group-parent"></select></label></p>
@@ -339,7 +339,7 @@ el('undo-sidebar').onclick=()=>act('undo_sidebar_batch',{batch:state.sidebarRevi
   result.undo_on_quit?'Fully quit the app to finish undoing the last sidebar batch.':'Sidebar restored. Project, section and order sync are off on this desktop.');
 async function connect(){
   try{
-    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.13.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
+    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.14.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
     theme(host.hostContext);send({method:'ui/notifications/initialized',params:{}});
     new ResizeObserver(()=>send({method:'ui/notifications/size-changed',params:{height:document.querySelector('main').offsetHeight}})).observe(document.querySelector('main'));
     working=false;await act();if(typeof loadActions==='function')await loadActions();

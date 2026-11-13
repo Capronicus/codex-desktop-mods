@@ -152,14 +152,33 @@ window.addEventListener('message',event=>{
 });
 
 let groupData;
+function groupPath(key) {
+  const path = [];
+  while (key && !path.includes(key)) {
+    path.unshift(key);
+    const parent = key.startsWith('custom:') ? groupData.parents[key.slice(7)] : '';
+    key = parent && (Object.hasOwn(groupData.projects,parent) || parent.startsWith('custom:') && Object.hasOwn(groupData.sections,parent.slice(7))) ? parent : '';
+  }
+  return path;
+}
+function groupLabel(key) {
+  return groupPath(key).map(id => id.startsWith('custom:') ? groupData.sections[id.slice(7)] : groupData.projects[id]).join(' › ');
+}
 function renderGroupAction() {
   if (!groupData) return;
   const mode=el('group-action').value, source=el('group-source'), parent=el('group-parent');
   const lastSource=source.value, lastParent=parent.value;
   const groups=mode==='demote'?groupData.projects:groupData.sections;
-  selectValues(source,Object.entries(groups));
+  const sectionKeys=Object.keys(groupData.sections).map(id=>'custom:'+id);
+  selectValues(source,Object.keys(groups).map(id=>[id,groupLabel(mode==='demote'?id:'custom:'+id)]));
   if(Object.hasOwn(groups,lastSource))source.value=lastSource;
-  const choices=Object.entries(groupData.projects).filter(([id])=>mode!=='demote'||id!==source.value);
+  const root=mode==='create'?null:mode==='demote'?source.value:'custom:'+source.value;
+  const paths = sectionKeys.map(groupPath);
+  const height=Math.max(1,...paths.filter(path=>path.includes(root)).map(path=>path.length-path.indexOf(root)));
+  const choices=[...Object.keys(groupData.projects), ...sectionKeys].filter(id=>{
+    const path=groupPath(id);
+    return !path.includes(root) && path.length+height<=3;
+  }).map(id=>[id,groupLabel(id)]);
   if(mode!=='create')choices.unshift(['','Top-level sections']);
   selectValues(parent,choices);
   if(choices.some(([id])=>id===lastParent))parent.value=lastParent;
@@ -175,15 +194,20 @@ async function loadGroups(ctx={}) {
   try {
     groupData=await call('sidebar_group_inventory');
     if(ctx.project)el('group-action').value='create';
-    if(ctx.section)el('group-action').value='promote';
+    if(ctx.section)el('group-action').value=groupPath('custom:'+ctx.section).length<3?'create':'move';
     renderGroupAction();
     if(ctx.project && Object.hasOwn(groupData.projects,ctx.project))el('group-parent').value=ctx.project;
-    if(ctx.section && Object.hasOwn(groupData.sections,ctx.section))el('group-source').value=ctx.section;
+    if(ctx.section && Object.hasOwn(groupData.sections,ctx.section)){
+      el('group-source').value=ctx.section;
+      renderGroupAction();
+      if(el('group-action').value==='create')el('group-parent').value='custom:'+ctx.section;
+      else el('group-parent').value=groupData.parents[ctx.section]||'';
+    }
     el('group-feedback').textContent=groupData.error || (groupData.pending?'Queued: '+groupData.pending+'. Fully quit and reopen the app.':
       groupData.ready?'':'Sign in to the desktop to organize local projects and custom sections.');
   }catch(error){el('group-feedback').textContent=error.message;}
 }
-el('group-editor').ontoggle=()=>{if(el('group-editor').open && !groupData)loadGroups();};
+el('group-editor').ontoggle=()=>{if(el('group-editor').open && !groupData && dashboardState?.context?.action!=='organize')loadGroups();};
 el('group-action').onchange=renderGroupAction;
 el('group-source').onchange=renderGroupAction;
 async function saveGroup(action) {
