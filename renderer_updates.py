@@ -115,10 +115,10 @@ def adapt(role, source, files, pet_assets):
     elif role == 'linkedmenu':
         memo_header = r'([\w$]+)=\(0,r\.c\)\((\d+)\),\{align:'
         memo, slots = re.search(memo_header, body).groups()
-        body = replace(body, memo_header, f'cscId=e.cscProjectId,{memo}=(0,r.c)({int(slots)+1}),{{align:')
+        body = replace(body, memo_header, f'cscId=e.cscProjectId,cscLinked=e.linkedLocalProjectId,{memo}=(0,r.c)({int(slots)+1}),{{align:')
         body = replace(body, re.escape(memo)+r'\[16\]!==t\)\{(let [\w,]+;)if\(n=\[\{id:(\w+),message:V',
                        lambda m: f'{memo}[16]!==t||{memo}[{slots}]!==cscId){{{m[1]}{memo}[{slots}]=cscId;'
-                       f'if(n=[...cscId?[csc.menuItem("project",cscId),...csc.actionItems("project",cscId)]:[],{{id:{m[2]},message:V')
+                       f'if(n=[...cscId?[csc.menuItem("project",cscId)]:[],...csc.actionItems("project",cscId??cscLinked,cscLinked),{{id:{m[2]},message:V')
     elif role == 'chatmenu':
         body = replace(body,r'(selectedThreadKeys:(\w+),threadKey:(\w+)\}\)\{if\(\2.length<2\)return )t;',
                        r'\1[csc.menuItem("chat",\3),...csc.actionItems("chat",\3),...t];')
