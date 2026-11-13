@@ -125,6 +125,8 @@ TOOLS = [
         "Opt in or out of local chat pins and sidebar ordering on this device.",
         {"enabled": {"type": "boolean"}},
     ),
+    tool("set_archive_sync", "Enable or disable archiving and restoring chats here when another desktop archives or restores them.",
+         {"enabled": {"type": "boolean"}}),
     tool("set_marks_sync", "Enable or disable exchanging this account's bookmarks, saved views and text animations through the configured private folder.",
          {"enabled": {"type": "boolean"}}),
     tool(
@@ -207,6 +209,7 @@ ACTIONS = {
     "chat_sync_status": sync.status,
     "set_settings_sync": lambda enabled: sync.set_exchange_option("settings", enabled),
     "set_marks_sync": lambda enabled: sync.set_exchange_option("marks", enabled),
+    "set_archive_sync": lambda enabled: sync.set_exchange_option("archive", enabled),
     "sync_settings_now": sync.sync_settings_now,
     "preview_settings_sync": lambda: sync.sync_settings_now("preview"),
     "apply_settings_preview": lambda review: sync.sync_settings_now("apply", review),

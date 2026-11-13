@@ -143,6 +143,7 @@ def status():
         "order": bool(cfg and cfg.get("order")),
         "tree": bool(cfg and cfg.get("tree")),
         "marks": bool(cfg and cfg.get("marks")),
+        "archive": bool(cfg and cfg.get("archive")),
         "device_name": cfg and cfg.get("device_name"),
         "device_emoji": cfg and cfg.get("device_emoji", ""),
         "sidebar_preview": {k: preview[k] for k in ("id", "counts") if k in preview} or None,
@@ -161,7 +162,7 @@ def last_folder_check(cfg):
 
 
 def set_exchange_option(option, enabled):
-    if option not in ("colours", "sidebar", "order", "settings", "tree", "marks") or type(enabled) is not bool:
+    if option not in ("colours", "sidebar", "order", "settings", "tree", "marks", "archive") or type(enabled) is not bool:
         raise ValueError("Unknown sync option")
     with lock(STATE / "sync.lock"):
         cfg = read_json(CONFIG)
@@ -489,7 +490,31 @@ def valid_manifest(man, tid):
         or not isinstance(clock[1], str)
     ):
         raise ValueError("Invalid name revision")
+    filed = man.get("archive_clock", [0, ""])
+    if (
+        not isinstance(filed, list)
+        or len(filed) != 2
+        or type(filed[0]) != int
+        or filed[0] < 0
+        or not isinstance(filed[1], str)
+    ):
+        raise ValueError("Invalid archive revision")
     return man
+
+
+def archive_change(copies, mine):
+    """Return [revision, archived] when another desktop filed this chat differently and later."""
+    newest = max(
+        (m for m in copies.values() if m.get("archive_clock")),
+        key=lambda m: tuple(m["archive_clock"]),
+        default=None,
+    )
+    if not newest or tuple(newest["archive_clock"]) <= tuple(mine.get("archive_clock", [0, ""])):
+        return None
+    if newest["archived"] == mine["archived"]:
+        mine["archive_clock"] = newest["archive_clock"]
+        return None
+    return [newest["archive_clock"], newest["archived"]]
 
 
 def is_prefix(vault, a, b):
@@ -824,6 +849,18 @@ def run(automatic=False):
                     if name and name != previous.get("name"):
                         clock = [clock[0] + 1, device]
                     snap["manifest"]["name_clock"] = clock
+                    # Archiving here is a revision of its own. A change received from
+                    # another desktop keeps that desktop's revision once it is applied.
+                    filed, queued = previous.get("archive_clock"), prev.get("pending_archive")
+                    if queued and queued[1] == snap["manifest"]["archived"]:
+                        filed = queued[0]
+                        snap.pop("pending_archive", None)
+                    elif queued:
+                        snap["pending_archive"] = queued
+                    elif cfg.get("archive") and previous and previous.get("archived") != snap["manifest"]["archived"]:
+                        filed = [(filed or [0, ""])[0] + 1, device]
+                    if filed:
+                        snap["manifest"]["archive_clock"] = filed
                     pending = prev.get("pending_name")
                     if pending:
                         snap["pending_name"] = pending
@@ -878,6 +915,10 @@ def run(automatic=False):
                     checkouts[tid] = checkout
                 if up_to_date:
                     accepted.add(tid)
+                    if cfg.get("archive"):
+                        move = archive_change(copies, current)
+                        if move:
+                            state[tid]["pending_archive"] = move
                     if latest_name and best["name_clock"] > current.get("name_clock", [0, ""]):
                         state[tid]["manifest"] = {
                             **current,
@@ -893,7 +934,18 @@ def run(automatic=False):
                     checkouts[tid] = checkout
                 imported_ids.add(tid)
                 # Carry the name until the native app server indexes the rollout.
-                state[tid] = {"manifest": best, "pending_name": best.get("name")}
+                stored = best
+                if current:
+                    # The file stays where it was filed here. Only its history was replaced.
+                    stored = {k: v for k, v in best.items() if k != "archive_clock"}
+                    stored["archived"] = current["archived"]
+                    if current.get("archive_clock"):
+                        stored["archive_clock"] = current["archive_clock"]
+                state[tid] = {"manifest": stored, "pending_name": best.get("name")}
+                if current and cfg.get("archive"):
+                    move = archive_change(copies, stored)
+                    if move:
+                        state[tid]["pending_archive"] = move
                 stats["updated" if current else "imported"] += 1
             except Busy:
                 busy.add(tid)
@@ -926,6 +978,20 @@ def run(automatic=False):
             for tid in named:
                 state[tid].pop("pending_name", None)
             atomic(state_path, encode(state))
+        if cfg.get("archive"):
+            moves = {
+                tid: s["pending_archive"][1]
+                for tid, s in state.items()
+                if s.get("pending_archive") and tid in local_files and tid not in private and tid not in busy
+            }
+            if moves:
+                from native_names import apply_archive
+
+                try:
+                    apply_archive(moves, HOME)
+                except (OSError, sqlite3.Error, subprocess.SubprocessError):
+                    pass  # The next pass sees where each file is and tries again.
+                stats["archive_moves"] = len(moves)
         stats["pending_names"] = sum(bool(s.get("pending_name")) for s in state.values())
         stats["unavailable_local"] = sum(
             tid not in local_files

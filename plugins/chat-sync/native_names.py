@@ -119,6 +119,22 @@ def apply_through_api(names, home):
     return done
 
 
+def apply_archive(moves, home):
+    """Archive or restore chats through Codex, which moves the history and updates its catalogue."""
+    done = []
+    try:
+        with native_api(home) as call:
+            for tid, archived in moves.items():
+                try:
+                    call("thread/archive" if archived else "thread/unarchive", {"threadId": tid})
+                    done.append(tid)
+                except ValueError:
+                    continue
+    except (OSError, EOFError, ValueError):
+        pass
+    return done
+
+
 def apply_names(names, home):
     try:
         done = apply_through_api(names, home)

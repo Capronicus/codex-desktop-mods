@@ -15,6 +15,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 patcher = importlib.import_module('sidebar-colours')
@@ -310,6 +311,51 @@ def remove():
     return 'Removed the Windows mod launcher and cached app. Your chat profile is preserved.'
 
 
+def with_progress(task):
+    """Run a long rebuild beside a small window, so the first launch after an update is not silent."""
+    try:
+        import tkinter
+        from tkinter import ttk
+    except ImportError:
+        return task()
+    outcome = {}
+
+    def work():
+        try:
+            outcome['value'] = task()
+        except BaseException as exc:
+            outcome['error'] = exc
+
+    worker = threading.Thread(target=work, daemon=True)
+    worker.start()
+    # The window is a courtesy. Whatever happens to it, the rebuild decides the result.
+    try:
+        window = tkinter.Tk()
+        window.title('Codex Desktop Mods')
+        window.resizable(False, False)
+        window.protocol('WM_DELETE_WINDOW', lambda: None)
+        ttk.Label(window, padding=16, text='Preparing ChatGPT with your desktop mods.\n'
+                  'This runs once after each app update and can take a minute.').pack()
+        bar = ttk.Progressbar(window, mode='indeterminate', length=320)
+        bar.pack(padx=16, pady=(0, 16))
+        bar.start(12)
+
+        def poll():
+            if worker.is_alive():
+                window.after(200, poll)
+            else:
+                window.destroy()
+
+        window.after(200, poll)
+        window.mainloop()
+    except Exception:
+        pass
+    worker.join()
+    if 'error' in outcome:
+        raise outcome['error']
+    return outcome['value']
+
+
 def start_packaged(exe):
     # The app discovers the registered core, sandbox service and profile through
     # its MSIX identity. Keep that identity when starting the private copy.
@@ -327,7 +373,8 @@ def launch():
             pkg = package()
             if not pkg:
                 raise ValueError('The Windows ChatGPT package is unavailable.')
-            dest = runtime(*pkg, root)
+            ready = (root / 'runtimes' / revision(*pkg, tool_version()) / '.complete').is_file()
+            dest = runtime(*pkg, root) if ready else with_progress(lambda: runtime(*pkg, root))
             prune_unused(root, dest)
             start_packaged(dest / EXE)
     except Exception as exc:  # Any failure to prepare the patched copy opens the stock app.
