@@ -61,6 +61,10 @@ async function probe(url) {
         assert.ok([...prefs].some(([k,v])=>k.startsWith('override-project/') && v==='on'));
         assert.ok([...prefs.keys()].some(k=>k.startsWith('swatch/')));
         console.log('Verified native Windows picker, group override and saved swatch.');
+        await evaluate("document.querySelector('#csc-saved-views summary').click()");
+        for (let n=0;n<40 && !await evaluate("!!document.querySelector('#csc-saved-views select')");n++) await wait(100);
+        assert.ok(await evaluate("!!document.querySelector('#csc-saved-views select')"),'saved views opened using the Store catalogue');
+        await evaluate("document.querySelector('#csc-saved-views summary').click()");
         await evaluate('window.localChatDetails.openModControls()');
         const panel = 'document.querySelector(\'webview[title="Mod Controls"]\')';
         for (let i = 0; i < 80 && !await evaluate(`!!${panel}`); i++) await wait(250);

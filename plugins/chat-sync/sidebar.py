@@ -10,6 +10,7 @@ import uuid
 from native_names import native_api
 import desktop_layout
 import projects
+import section_tree
 import ordering
 import batches
 
@@ -136,6 +137,9 @@ def exchange(
             target = links.local(key.split("/")[1])
             groups.setdefault("project/" + target, ident)
     raw_current = layout.observed(eligible) if layout.enabled else dict(native)
+    tree_on = bool(cfg.get("sidebar") and cfg.get("tree") and layout.enabled and layout.account)
+    if tree_on:
+        raw_current.update(section_tree.observed(layout))
     if ordering_on:
         raw_current.update(ordering.observe(layout, eligible, pinned))
         native.update({"chat-pin/" + tid: tid in pinned for tid in eligible})
@@ -148,7 +152,7 @@ def exchange(
         ):
             if key.startswith("project/"):
                 key = "project/" + links.local(key.split("/")[1])
-            elif key.startswith("chat-project/") and val:
+            elif (key.startswith("chat-project/") or key.startswith("parent/") and val and not val.startswith("custom:")) and val:
                 val = links.local(val)
             if key == "order/projects":
                 val = list(dict.fromkeys(links.local(i) for i in val))
@@ -162,6 +166,8 @@ def exchange(
     def permitted(k, r):
         if sharing and not sharing.allows_row(k, r):
             return False
+        if k.startswith("parent/"):
+            return tree_on and k[7:] != desktop_layout.PINNED and r[2] != "custom:"+desktop_layout.PINNED
         return ordering_on or not k.startswith(("chat-pin/", "order/"))
 
     def filtered_order(key, record):
@@ -210,6 +216,7 @@ def exchange(
     folders = [(directory, valid_record)]
     if ordering_on:
         folders.append((vault / "order-v1", ordering.valid))
+    if tree_on: folders.append((section_tree.directory(vault, layout.account), section_tree.valid))
     for folder, validator in folders:
         for path in sorted(folder.glob("*.json")):
             if not uid(path.stem):
@@ -233,10 +240,18 @@ def exchange(
             except (AttributeError, KeyError, OSError, TypeError, ValueError):
                 deferred.append(path.stem)
 
+    tree_conflicts = set()
+    if tree_on:
+        edges = {k[7:]:r[2] for k,r in rows.items() if k.startswith("parent/") and "section/"+k[7:] not in hidden}
+        section_ids = {k[8:] for k in rows.keys() | current.keys() if k.startswith("section/") and k not in hidden}
+        project_ids = {k[8:] for k in rows.keys() | current.keys() if k.startswith("project/") and k not in hidden}
+        tree_conflicts = section_tree.invalid_edges(edges, section_ids, project_ids)
     changes = {}
     for key, (_, _, value) in rows.items():
         kind, obj = key.split("/")
         if key in hidden or (kind in ("section", "chat-section") and not section_access):
+            continue
+        if kind == "parent" and (obj in tree_conflicts or obj not in section_ids):
             continue
         if kind.startswith("chat-") and (obj not in eligible or key not in current):
             continue
@@ -268,6 +283,7 @@ def exchange(
         review["names"] = batches.preview_names(changes, rows, current, chat_index or {})
         review["sections_need_sign_in"] = not section_access
         review["deferred_devices"] = deferred
+        review["tree_conflicts"] = sorted(tree_conflicts)
         return review
     if action == "apply" and approval != review["id"]:
         raise ValueError("The sidebar preview changed. Request a fresh preview.")
@@ -307,10 +323,9 @@ def exchange(
     # acknowledged as our own applied change instead of creating a new revision.
     checkpoint()
     for folder, validator in folders:
-        ordered = validator is ordering.valid
         head_path = folder / (device + ".json")
         outgoing = {
-            k: r for k, r in rows.items() if k.startswith(("chat-pin/", "order/")) == ordered
+            k: r for k, r in rows.items() if validator(k, r)
         }
         content = encode({"v": 1, "rows": links.rows(outgoing, portable=True)})
         if not head_path.is_file() or head_path.read_bytes() != content:
@@ -478,6 +493,9 @@ def exchange(
         )
         cached_order = ordering.observe(layout, eligible, cached_pins) if ordering_on else {}
         for key, (_, _, value) in rows.items():
+            if key.startswith("parent/"):
+                if key in changes: projection[key] = [raw_current.get(key), value, None]
+                continue
             if key.startswith(("chat-pin/", "order/")):
                 desired = changes.get(key, [None, value])[1]
                 if key.startswith("chat-pin/") and key.split("/")[1] not in eligible:
@@ -523,6 +541,7 @@ def exchange(
     return {
         "desktop_refresh_on_quit": pending_layout,
         "sections_need_sign_in": not section_access,
+        "tree_conflicts": sorted(tree_conflicts),
         "created": created,
         "renamed": renamed,
         "assignments_updated": moved,

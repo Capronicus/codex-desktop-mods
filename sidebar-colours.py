@@ -27,7 +27,7 @@ ASSET = 'app-primary-f921a74f3eba.js'
 ORIGINAL_HASH = '43c553113064956188f435bd0ce433aa46dad054aeb8e9919c2495b0482182a0'
 MOD_FILES = ('sidebar-colours.py', 'sidebar-colours.js', 'chat-details-main.cjs',
              'chat-details-preload.cjs', 'chat-details.js', 'chat-details-cloud.js',
-             'renderer_updates.py', 'renderer-modules.json', 'chat-layout.js', 'sidebar-nesting.js', 'chat-word-animation.js')
+             'renderer_updates.py', 'renderer-modules.json', 'chat-layout.js', 'sidebar-nesting.js', 'chat-word-animation.js', 'sidebar-views.js')
 TRANSCRIPT = 'virtualized-turn-list-849fe48ea6b5.js'
 CLOUD_TRANSCRIPT = 'chatgpt-conversation-turn-content-48014b7b6a96.js'
 
@@ -111,7 +111,7 @@ def modify(js):
       const sidebarColours = createSidebarColours({
         preferencesReady, getPreference, setPreference, preferenceKeys, watchPreferencePrefix, readProjectPage
       });"""
-    return '\n'.join([bindings, (SOURCE / 'chat-word-animation.js').read_text(encoding='utf-8'), (SOURCE / 'sidebar-colours.js').read_text(encoding='utf-8'), init, js])
+    return '\n'.join([bindings, (SOURCE / 'sidebar-views.js').read_text(encoding='utf-8'), (SOURCE / 'chat-word-animation.js').read_text(encoding='utf-8'), (SOURCE / 'sidebar-colours.js').read_text(encoding='utf-8'), init, js])
 
 
 def legacy_chat_layout(js):

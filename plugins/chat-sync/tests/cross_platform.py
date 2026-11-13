@@ -146,7 +146,7 @@ def send_work_reply(app, call, tid, project, checkout):
     request = str(uuid.uuid4())
     for _ in range(2):
         assert call("send_reply_handoff", thread=tid, turn=turn["id"], item=item["id"],
-                    device=home_id, request=request, note=HANDOFF_NOTE)["sent"]
+                    device=home_id, request=request, note=HANDOFF_NOTE, reference=str(checkout/FILENAME))["sent"]
     assert not call("chat_action_dashboard")["inbox"]
 
 
@@ -167,6 +167,12 @@ def receive_work_reply(app, call, home):
     assert answer == "Birch metadata verified." and ref.endswith(FILENAME + ":12:3"), reply
     local = call("open_linked_file", thread=msg["thread"], reference=ref)
     assert Path(local["path"]) == checkout / FILENAME and local["text"] == "Home copy", local
+    comparison = {"sender":msg["sender"],"request":msg["id"]}
+    assert call("compare_handoff_file",**comparison)["status"] == "Changed here"
+    (checkout/FILENAME).write_bytes(b"Work copy")
+    assert call("compare_handoff_file",**comparison)["status"] == "Same version"
+    (checkout/FILENAME).unlink()
+    assert call("compare_handoff_file",**comparison)["status"] == "Missing here"
     assert set(panel["globalRules"]) == {project_id + "/all-desktops"}, panel["globalRules"]
     assert not panel["folders"], panel["folders"]
     call("dismiss_reply_handoff", sender=msg["sender"], request=msg["id"])

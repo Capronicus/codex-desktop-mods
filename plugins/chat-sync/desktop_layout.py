@@ -117,6 +117,7 @@ class Layout:
         ):
             before, value, native = changes[key]
             kind, ident = key.split("/")
+            if kind == "parent": continue
             if kind == "chat-pin" and current.get(key) == value:
                 ordering.project(self, key, value)
             if current.get(key) == value and not self.needs_mapping(kind, ident, native):
@@ -204,6 +205,9 @@ class Layout:
                     by_id[value]["itemKeys"].append(item)
                     section_state.setdefault("threadHostIds", {})[ident] = "local"
             applied[key] = value
+        if self.account and any(k.startswith("parent/") for k in changes):
+            import section_tree
+            applied.update(section_tree.apply(self, changes))
         return applied
 
 

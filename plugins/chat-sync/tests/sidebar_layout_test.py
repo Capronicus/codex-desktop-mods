@@ -17,6 +17,7 @@ from uuid import uuid4
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import desktop_layout
 import sidebar
+import section_tree
 import sync
 
 
@@ -25,6 +26,49 @@ def ident():
 
 
 class DesktopSidebar(unittest.TestCase):
+    def test_optional_tree_exchange(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            a,b,project,mid,leaf = (ident() for _ in range(5))
+            vault = root/"vault"
+            homes = [root/"home", root/"work"]
+            def exchange(home, dev, enabled):
+                cfg = {"device":dev, "sidebar":True, "tree":enabled, "review_first":False}
+                sync.atomic(home/"chat-sync/config.json",sync.encode(cfg))
+                return sidebar.exchange(home,vault,dev,set(),sync.atomic,sync.encode,cfg=cfg)
+            for home in homes:
+                home.mkdir()
+                sync.atomic(home/"auth.json",sync.encode({"tokens":{"account_id":"fixture"}}))
+                sync.atomic(home/".codex-global-state.json",sync.encode({
+                    "local-projects":{project:{"name":"Tartarus","rootPaths":[str(home)]}},
+                    "electron-persisted-atom-state":{desktop_layout.SECTIONS:{"fixture":{"sections":[
+                        {"id":id,"name":name,"hostSectionIds":{"local":id},"itemKeys":[]}
+                        for id,name in [(mid,"Elysium"),(leaf,"Seurat")]] }}}} ))
+                with closing(sqlite3.connect(home/"state_5.sqlite")) as db, db:
+                    db.executescript("CREATE TABLE projects(id,name,metadata);CREATE TABLE thread_sections(id,name,appearance);CREATE TABLE threads(id,project_id,thread_section_id);")
+                    db.execute("INSERT INTO projects VALUES(?,?,?)",(project,"Tartarus","{}"))
+                    db.executemany("INSERT INTO thread_sections VALUES(?,?,NULL)",[(mid,"Elysium"),(leaf,"Seurat")])
+            left,right=homes
+            tree={mid:project,leaf:"custom:"+mid}
+            lay=desktop_layout.Layout(left)
+            lay.data[section_tree.STORE]={"fixture":{"parents":tree}}
+            sync.atomic(lay.path,sync.encode(lay.data))
+            with patch.object(desktop_layout,"desktop_running",return_value=False):
+                exchange(left,a,False)
+                self.assertFalse((vault/"section-tree-v1").exists())
+                exchange(left,a,True)
+                head=section_tree.directory(vault,"fixture")/(a+".json")
+                self.assertNotIn(str(left),head.read_text())
+                exchange(right,b,False)
+                self.assertNotIn(section_tree.STORE,desktop_layout.Layout(right).data)
+                exchange(right,b,True)
+                desktop_layout.apply_pending(right)
+                lay=desktop_layout.Layout(right)
+                self.assertEqual(lay.data[section_tree.STORE]["fixture"]["parents"],tree)
+                self.assertEqual(lay.projects[project]["rootPaths"],[str(right)])
+                self.assertFalse(section_tree.apply(lay,{"parent/"+mid:[project,"custom:"+leaf,None]}))
+                self.assertEqual(lay.data[section_tree.STORE]["fixture"]["parents"],tree)
+
     def test_queued_undo_is_local_and_bound_to_the_selected_batch(self):
         with TemporaryDirectory() as temp:
             home = Path(temp)

@@ -119,7 +119,7 @@ class Links:
             kind, ident = key.split("/")
             if kind == "project":
                 key = kind + "/" + resolve(ident)
-            elif kind == "chat-project" and rec[2]:
+            elif (kind == "chat-project" or kind == "parent" and rec[2] and not rec[2].startswith("custom:")) and rec[2]:
                 rec = [*rec[:2], resolve(rec[2])]
             elif key == "order/projects":
                 rec = [*rec[:2], list(dict.fromkeys(resolve(i) for i in rec[2]))]
@@ -305,7 +305,7 @@ class Sharing:
         return (
             ident not in self.private_chats
             and ident not in self.private_projects
-            and not (kind == "chat-project" and rec[2] in self.private_projects)
+            and not (kind in ("parent","chat-project") and rec[2] in self.private_projects)
         )
 
     def allows_colour(self, key):

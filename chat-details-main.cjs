@@ -346,6 +346,53 @@
   const actionDir = path.join(home, 'chat-sync');
   const primaryFrame = event => event.senderFrame && event.senderFrame === event.sender.mainFrame &&
     /^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(event.senderFrame.url);
+  ipcMain.handle('local-sidebar:saved-view-data', async event => {
+    if (!primaryFrame(event)) throw Error('Unavailable sidebar.');
+    async function snapshot(file) {
+      try { return JSON.parse(await fs.readFile(file,'utf8')); }
+      catch (error) { if (error.code==='ENOENT') return {}; throw error; }
+    }
+    const [layout,cfg,receipts] = await Promise.all([
+      snapshot(path.join(home,'.codex-global-state.json')),
+      snapshot(path.join(actionDir,'config.json')), snapshot(path.join(actionDir,'delivery.json'))
+    ]);
+    const projects = {}, devices = {};
+    const aliases = layout['app-server-project-id-by-legacy-project-id-by-host']?.['local:'+home] || {};
+    const stable = new Map(Object.entries(aliases).map(([key,id])=>[id,key]));
+    for (const [key,record] of Object.entries(layout['local-projects'] || {}))
+      if (idPattern.test(key)) projects[key] = record.name || key;
+    const catalog = path.join(home,'state_5.sqlite');
+    const chats = [];
+    if (cfg.device) devices[cfg.device] = cfg.device_name || 'This device';
+    const current = !!cfg.device && cfg.device === receipts.device;
+    if (current) for (const [id,name] of Object.entries(receipts.peers || {}))
+      if (idPattern.test(id) && typeof name==='string') devices[id]=name;
+    const privateChats = new Set(cfg.private_chats || []);
+    let db;
+    try {
+      if (await fs.stat(catalog).catch(error=>{if(error.code!=='ENOENT')throw error;})) {
+        const {DatabaseSync} = require('node:sqlite');
+        db = new DatabaseSync(catalog,{readOnly:true});
+        const cols = new Set(db.prepare('PRAGMA table_info(threads)').all().map(row=>row.name));
+        const fields = ['id','title','name','updated_at','updated_at_ms','project_id','source'].filter(key=>cols.has(key));
+        if (cols.has('id')) for (const row of db.prepare('SELECT '+fields.join(',')+' FROM threads'+
+            (cols.has('archived')?' WHERE archived=0':'')).iterate()) {
+          if (!idPattern.test(row.id) || row.source?.includes('subagent')) continue;
+          const receipt = current && !privateChats.has(row.id) ? receipts.chats?.[row.id] : null;
+          const received = receipt?.received_by || [], busy = receipt?.waiting_on || [];
+          for (const peer of [receipt?.origin,...received,...busy])
+            if(peer && idPattern.test(peer.device)) devices[peer.device]=peer.name;
+          const assignment = layout['thread-project-assignments']?.[row.id];
+          const project = assignment?.projectId ?? stable.get(row.project_id) ?? row.project_id;
+          chats.push({id:row.id,title:row.name || row.title || row.id,project,
+            updated:row.updated_at_ms || (row.updated_at || 0)*1000,origin:receipt?.origin?.device,
+            shared:['saved','received'].includes(receipt?.status),received:received.map(p=>p.device),busy:busy.map(p=>p.device)});
+        }
+      }
+    } finally { db?.close(); }
+    return {account:require('node:crypto').createHash('sha256').update(colourAccount()).digest('hex'),
+      chats,projects,devices,device:cfg.device};
+  });
   async function saveAction(name, value) {
     await fs.mkdir(actionDir, {recursive:true, mode:0o700});
     const tmp = path.join(actionDir, '.action-' + require('node:crypto').randomUUID());
@@ -355,11 +402,18 @@
     } finally { await fs.unlink(tmp).catch(()=>{}); }
   }
   ipcMain.handle('local-chat-actions:context', async (event, input) => {
-    if (!primaryFrame(event) || !input || !['handoff','inbox','file','family','project','organize','conflicts','performance'].includes(input.action))
+    if (!primaryFrame(event) || !input || !['handoff','inbox','file','family','project','organize','conflicts','performance','bookmarks','new-bookmark'].includes(input.action))
       throw new Error('Unavailable desktop action.');
     const ctx = {action:input.action,id:require('node:crypto').randomUUID(),at:Date.now()};
     for (const key of ['thread','turn','project','section']) if (typeof input[key]==='string' && idPattern.test(input[key])) ctx[key]=input[key];
     for (const [key,limit] of [['reference',4096],['item',160]]) if (typeof input[key]==='string') ctx[key]=input[key].slice(0,limit);
+    if(input.action==='new-bookmark'){
+      if(typeof input.anchor!=='string'||input.anchor.length>2048)throw Error('Invalid bookmark selection.');
+      const [key,start,end,hash]=JSON.parse(input.anchor), address=JSON.parse(key);
+      if(!Array.isArray(address)||!['local','cloud'].includes(address[0])||!Number.isSafeInteger(start)||
+          !Number.isSafeInteger(end)||start<0||end<start||typeof hash!=='string')throw Error('Invalid message selection.');
+      ctx.anchor=input.anchor;ctx.label=String(input.label||'').slice(0,160);ctx.account=colourAccount();
+    }
     await saveAction('desktop-request.json',ctx);
   });
   ipcMain.handle('local-chat-actions:performance', async (event, report) => {
@@ -399,9 +453,13 @@
     try {
       await fs.rename(command,claimed);
       const doc=JSON.parse(await fs.readFile(claimed,'utf8'));
-      if(Date.now()-doc.at>=0 && Date.now()-doc.at<60000 && (doc.action==='measure' ||
+      if(Date.now()-doc.at>=0 && Date.now()-doc.at<60000 && (doc.action==='measure' || (doc.action==='bookmark' && doc.account===colourAccount() && idPattern.test(doc.thread) && typeof doc.anchor==='string' && doc.anchor.length<=2048) ||
           (doc.action==='navigate' && idPattern.test(doc.thread) && (!doc.turn || idPattern.test(doc.turn)))))
-        contents.send('local-chat-actions:command',doc);
+        {
+          if (doc.action === 'bookmark' && doc.cloud)
+            contents.send('codex_desktop:message-for-view', {type:'navigate-to-route', path:'/c/' + doc.thread});
+          contents.send('local-chat-actions:command',doc);
+        }
     } catch { /* Another window may already have claimed the request. */ }
     finally {await fs.unlink(claimed).catch(()=>{});}
   }

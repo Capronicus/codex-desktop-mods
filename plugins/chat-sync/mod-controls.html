@@ -44,7 +44,8 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 <p id="action-status" role="status" aria-live="polite"></p>
 <details id="file-copy"><summary>Open local copy</summary><p id="file-hint"></p><label>File in linked project <input id="file-reference" maxlength="4096"></label> <button id="file-open">Open local copy</button></details>
 <details id="send-handoff"><summary>Hand off a reply</summary><p id="send-hint"></p>
-<label>Send to <select id="handoff-device"></select></label> <label>Optional note <input id="handoff-note" maxlength="500"></label> <button id="handoff-send">Send handoff</button></details>
+<label>Send to <select id="handoff-device"></select></label> <label>File to compare (optional) <input id="handoff-file" maxlength="4096" placeholder="Path in the linked checkout"></label> <label>Optional note <input id="handoff-note" maxlength="500"></label> <button id="handoff-send">Send handoff</button></details>
+<details id="bookmarks"><summary>Bookmarks</summary><div id="bookmark-new" hidden><label>Bookmark name <input id="bookmark-name" maxlength="160"></label> <button id="bookmark-save">Save bookmark</button></div><ul id="bookmark-list"></ul></details>
 <details id="handoff-inbox"><summary>Reply handoffs</summary><ul id="inbox-list"></ul></details>
 <details id="branches"><summary>Chat branches</summary><p id="family-hint"></p><button id="family-show">Show parent and branches</button></details>
 <details id="conflict-preview"><summary>Compare conflicting chats</summary><ul id="conflict-list"></ul></details>
@@ -57,12 +58,14 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 </details></section>
 <section><details id="group-editor"><summary>Organize projects and sections</summary>
 <p>Groups can be three levels deep, including the project or top-level section. Changes apply on this PC after you fully quit the desktop app.</p>
-<p><label>Action <select id="group-action"><option value="create">Create subsection</option><option value="move">Move section</option><option value="promote">Convert section to project</option><option value="demote">Convert project to section</option></select></label></p>
+<p><label>Action <select id="group-action"><option value="create">Create subsection</option><option value="move">Move section</option><option value="assign">Move chats</option><option value="promote">Convert section to project</option><option value="demote">Convert project to section</option></select></label></p>
 <p id="group-source-row"><label>Group <select id="group-source"></select></label></p>
 <p id="group-parent-row"><label>Place in <select id="group-parent"></select></label></p>
+<p id="batch-chats-row" hidden><label>Chats <select multiple size="6" id="batch-chats"></select></label></p>
 <p id="group-name-row"><label>Subsection name <input id="group-name" maxlength="150"></label></p>
 <p id="group-folder-row"><label>Project folder (optional) <input id="group-folder" placeholder="Keep existing folder"></label></p>
-<button id="group-save">Save change</button> <button id="group-cancel" hidden>Cancel pending change</button> <button id="group-retry" hidden>Retry change</button>
+<button id="batch-add">Add to batch</button> <button id="group-save">Save change</button> <button id="group-cancel" hidden>Cancel pending change</button> <button id="group-retry" hidden>Retry change</button>
+<div id="batch-review" hidden><strong>Batch preview</strong><ol id="batch-lines"></ol><button id="batch-refresh">Refresh preview</button> <button id="batch-back">Remove last change</button> <button id="batch-apply">Apply batch on quit</button></div>
 <p id="group-feedback" role="status"></p></details></section>
 <section id="sidebar-review" hidden><h2>Sidebar changes</h2>
 <p id="sidebar-status"></p>
@@ -81,7 +84,7 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 'use strict';
 const el = id => document.getElementById(id);
 const features = {wideChat:'Wider chats',petDock:'Pet in the chat margin',petMotion:'Pet runs while scrolling',timestamps:'Message timestamps',tokens:'Turn and chat token counts',branchLines:'Lines between branched chats'};
-const options = {colours:['Colours and saved swatches','set_colour_sync'],settings:['Appearance and chat preferences','set_settings_sync'],sidebar:['Projects and sections','set_sidebar_sync'],order:['Pins and order','set_pin_order_sync']};
+const options = {colours:['Colours and saved swatches','set_colour_sync'],settings:['Appearance and chat preferences','set_settings_sync'],sidebar:['Projects and sections','set_sidebar_sync'],tree:['Subsection tree','set_tree_sync'],order:['Pins and order','set_pin_order_sync']};
 const pending = new Map();
 let seq = 0, state, working = true;
 let preview=null, visibleChanges=25;
@@ -137,6 +140,10 @@ function describeChange({action,id,before,after},names){
     const list=ids=>(ids||[]).map(value=>name(kind,value)).join(' · ')||'None';
     return [title,list(before)+' → '+list(after)];
   }
+  if(action==='subsections_moved'){
+    const parent=v=>v?name(v.startsWith('custom:')?'section':'project',v.replace(/^custom:/,'')):'Top level';
+    return [name('section',id),parent(before)+' → '+parent(after)];
+  }
   if(action==='pins_changed')return [after?'Pin chat':'Unpin chat',name('chat',id)];
   if(action==='project_moves'||action==='section_moves'){
     const kind=action==='project_moves'?'project':'section';
@@ -173,6 +180,7 @@ function renderSidebar(s){
   el('review-hint').textContent=[
     n?'After the first approval, later syncs can apply sidebar changes automatically.':'',
     n&&s.paused?'Resume sync before applying changes.':'',
+    preview.tree_conflicts?.length?'Conflicting nesting detected. Move the affected sections to valid parents and sync again.':'',
     preview.sections_need_sign_in?'Sign in to review custom sections.':'',
     preview.deferred_devices?.length?'Some device records are unavailable. Check again after your folder finishes syncing.':''
   ].filter(Boolean).join(' ');
@@ -284,7 +292,7 @@ function render(){
   }
   for(const key of Object.keys(options)){
     if(!working) el(key).checked=s.options[key];
-    el(key).disabled=working||!s.configured||(key==='order'&&!s.options.sidebar);
+    el(key).disabled=working||!s.configured||(['order','tree'].includes(key)&&!s.options.sidebar);
   }
 }
 async function act(tool,args={},message=''){
@@ -339,7 +347,7 @@ el('undo-sidebar').onclick=()=>act('undo_sidebar_batch',{batch:state.sidebarRevi
   result.undo_on_quit?'Fully quit the app to finish undoing the last sidebar batch.':'Sidebar restored. Project, section and order sync are off on this desktop.');
 async function connect(){
   try{
-    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.14.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
+    const host=await rpc('ui/initialize',{appInfo:{name:'Mod Controls',version:'0.15.0'},appCapabilities:{},protocolVersion:'2026-01-26'});
     theme(host.hostContext);send({method:'ui/notifications/initialized',params:{}});
     new ResizeObserver(()=>send({method:'ui/notifications/size-changed',params:{height:document.querySelector('main').offsetHeight}})).observe(document.querySelector('main'));
     working=false;await act();if(typeof loadActions==='function')await loadActions();

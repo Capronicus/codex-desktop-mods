@@ -34,10 +34,13 @@ async function loadActions() {
         await loadGroups(ctx);
         el('group-editor').scrollIntoView({block:'start'});
       }else el('chat-actions').open=true;
-      const section=({handoff:'send-handoff',file:'file-copy',family:'branches',project:'exclude-project',inbox:'handoff-inbox',performance:'performance',conflicts:'conflict-preview'})[ctx.action];
+      const section=({bookmarks:'bookmarks','new-bookmark':'bookmarks',handoff:'send-handoff',file:'file-copy',family:'branches',project:'exclude-project',inbox:'handoff-inbox',performance:'performance',conflicts:'conflict-preview'})[ctx.action];
       if(section)el(section).open=true;
+      el('bookmark-new').hidden=ctx.action!=='new-bookmark';
+      el('bookmark-name').value=ctx.label||'';
+      if(section==='bookmarks')await loadBookmarks();
       el('file-reference').value=ctx.reference||'';
-      el('handoff-note').value='';el('action-content').replaceChildren();reportAction('');
+      el('handoff-file').value=ctx.action==='handoff'?ctx.reference||'':'';el('handoff-note').value='';el('action-content').replaceChildren();reportAction('');
     }
     const devices=el('handoff-device'),prior=devices.value;
     selectValues(devices,Object.entries(data.devices));if(data.devices[prior])devices.value=prior;
@@ -56,6 +59,12 @@ async function loadActions() {
         showReply(r.text,r.truncated);
       }),actionButton('Open in chat',()=>command('navigate',msg)),
       actionButton('Done',async()=>{await call('dismiss_reply_handoff',{sender:msg.sender,request:msg.id});await loadActions();}));
+      if(msg.file)row.append(actionButton('Compare '+msg.file,async()=>{
+        const args={sender:msg.sender,request:msg.id}, result=await call('compare_handoff_file',args);
+        const block=el('action-content');
+        block.replaceChildren(actionText('h3',result.status),actionText('p',result.reference));
+        if(result.status!=='Missing here')block.append(actionButton('Open local copy',()=>showFile({thread:msg.thread,reference:result.reference})));
+      }));
       list.append(row);
     }
     const project=el('sharing-project'),previous=project.value;
@@ -118,20 +127,20 @@ function handoffRequestId(){
 }
 bindAction('handoff-send',async()=>{
   const ctx=dashboardState.context, device=el('handoff-device').value,note=el('handoff-note').value;
-  const signature=JSON.stringify([ctx.id,device,note]);
+  const reference=el('handoff-file').value.trim(), signature=JSON.stringify([ctx.id,device,note,reference]);
   if(el('handoff-send').dataset.signature!==signature){el('handoff-send').dataset.signature=signature;el('handoff-send').dataset.request=handoffRequestId();}
-  await call('send_reply_handoff',{thread:ctx.thread,turn:ctx.turn,item:ctx.item||'',device,note,request:el('handoff-send').dataset.request});
+  await call('send_reply_handoff',{thread:ctx.thread,turn:ctx.turn,item:ctx.item||'',device,note,reference,request:el('handoff-send').dataset.request});
   reportAction('Handoff saved for '+dashboardState.devices[device]+'.');
 });
-bindAction('file-open',async()=>{
-  const args={thread:dashboardState.context.thread,reference:el('file-reference').value};
+async function showFile(args){
   const file=await call('open_linked_file',args),block=el('action-content');
   block.replaceChildren(actionText('h3',file.path));
   if(file.image){const img=document.createElement('img');img.alt='Local file preview';img.src=file.image;block.append(img);}
   else block.append(actionText('pre',file.binary?'Preview unavailable for this file type.':file.text+(file.truncated?'\n…':'')));
   if(typeof file.text==='string')block.append(actionButton('Open in text editor',()=>call('edit_linked_file',args)));
   block.append(actionButton('Show in folder',()=>call('reveal_linked_file',args)));
-});
+}
+bindAction('file-open',()=>showFile({thread:dashboardState.context.thread,reference:el('file-reference').value}));
 bindAction('family-show',async()=>{
   const rows=await call('list_chat_family',{thread:dashboardState.context.thread}),block=el('action-content');
   block.replaceChildren(actionText('h3','Chat branches'));
@@ -151,7 +160,7 @@ window.addEventListener('message',event=>{
   if(event.source===parent && event.data?.method==='ui/notifications/tool-result' && state)loadActions();
 });
 
-let groupData;
+let groupData, batchSteps=[], batchChats, batchReview='';
 function groupPath(key) {
   const path = [];
   while (key && !path.includes(key)) {
@@ -172,17 +181,24 @@ function renderGroupAction() {
   const sectionKeys=Object.keys(groupData.sections).map(id=>'custom:'+id);
   selectValues(source,Object.keys(groups).map(id=>[id,groupLabel(mode==='demote'?id:'custom:'+id)]));
   if(Object.hasOwn(groups,lastSource))source.value=lastSource;
-  const root=mode==='create'?null:mode==='demote'?source.value:'custom:'+source.value;
+  const root=['create','assign'].includes(mode)?null:mode==='demote'?source.value:'custom:'+source.value;
   const paths = sectionKeys.map(groupPath);
   const height=Math.max(1,...paths.filter(path=>path.includes(root)).map(path=>path.length-path.indexOf(root)));
   const choices=[...Object.keys(groupData.projects), ...sectionKeys].filter(id=>{
     const path=groupPath(id);
-    return !path.includes(root) && path.length+height<=3;
+    return !path.includes(root) && (mode==='assign'||path.length+height<=3);
   }).map(id=>[id,groupLabel(id)]);
-  if(mode!=='create')choices.unshift(['','Top-level sections']);
+  if(!['create','assign'].includes(mode))choices.unshift(['','Top-level sections']);
   selectValues(parent,choices);
   if(choices.some(([id])=>id===lastParent))parent.value=lastParent;
-  el('group-source-row').hidden=mode==='create';
+  el('group-source-row').hidden=['create','assign'].includes(mode);
+  el('batch-chats-row').hidden=mode!=='assign';
+  if(mode==='assign' && !batchChats)call('sidebar_batch_chat_choices').then(rows=>{
+    if(!batchChats){batchChats=rows;selectValues(el('batch-chats'),Object.entries(rows));}
+  }).catch(e=>{el('group-feedback').textContent=e.message;});
+  el('batch-add').hidden=!['create','move','assign'].includes(mode);
+  el('batch-add').disabled=!groupData.ready||!!groupData.pending;
+  el('group-save').hidden=!!batchSteps.length || mode==='assign';
   el('group-parent-row').hidden=mode==='promote';
   el('group-name-row').hidden=mode!=='create';
   el('group-folder-row').hidden=mode!=='promote';
@@ -192,7 +208,7 @@ function renderGroupAction() {
 }
 async function loadGroups(ctx={}) {
   try {
-    groupData=await call('sidebar_group_inventory');
+    groupData=batchSteps.length?(await call('sidebar_batch',{steps:batchSteps})).groups:await call('sidebar_group_inventory');
     if(ctx.project)el('group-action').value='create';
     if(ctx.section)el('group-action').value=groupPath('custom:'+ctx.section).length<3?'create':'move';
     renderGroupAction();
@@ -223,3 +239,50 @@ async function saveGroup(action) {
 el('group-save').onclick=()=>saveGroup();
 el('group-cancel').onclick=()=>saveGroup('cancel');
 el('group-retry').onclick=()=>saveGroup('retry');
+
+async function previewBatch(steps) {
+  const result=await call('sidebar_batch',{steps});
+  batchSteps=steps; batchReview=result.review; groupData=result.groups;
+  el('batch-lines').replaceChildren(...result.preview.map(line=>actionText('li',line)));
+  el('batch-review').hidden=!steps.length;
+  el('group-name').value=''; renderGroupAction();
+}
+bindAction('batch-add',async()=>{
+  const action=el('group-action').value;
+  const step={action,parent:el('group-parent').value,source:action==='create'?handoffRequestId():el('group-source').value};
+  if(action==='create')step.name=el('group-name').value.trim();
+  if(action==='assign')step.chats=[...el('batch-chats').selectedOptions].map(o=>o.value);
+  try{await previewBatch([...batchSteps,step]);el('group-feedback').textContent='';}
+  catch(e){el('group-feedback').textContent=e.message;}
+});
+bindAction('batch-refresh',()=>previewBatch(batchSteps));
+bindAction('batch-back',()=>previewBatch(batchSteps.slice(0,-1)));
+bindAction('batch-apply',async()=>{
+  try{
+    await call('sidebar_batch',{steps:batchSteps,commit:true,review:batchReview});
+    batchSteps=[];el('batch-review').hidden=true;await loadGroups();
+  }catch(e){el('group-feedback').textContent=e.message;}
+});
+
+async function loadBookmarks(){
+  try{
+    const list=el('bookmark-list'), rows=await call('list_message_bookmarks');
+    list.replaceChildren();
+    for(const mark of rows){
+      const li=document.createElement('li'), name=document.createElement('input');
+      name.value=mark.label;name.maxLength=160;name.setAttribute('aria-label','Bookmark name');name.hidden=true;
+      const edit=(action,label='')=>call('edit_message_bookmark',{action,ident:mark.id,label});
+      li.append(actionButton(mark.label,()=>edit('open')),name,actionButton('Rename',async()=>{
+        if(name.hidden){name.hidden=false;name.focus();name.select();return;}
+        await edit('rename',name.value);await loadBookmarks();
+      }),actionButton('Remove',async()=>{await edit('remove');await loadBookmarks();}));
+      list.append(li);
+    }
+    if(!rows.length)list.append(actionText('li','No bookmarks yet.'));
+  }catch(e){reportAction(e.message);}
+}
+el('bookmarks').ontoggle=()=>{if(el('bookmarks').open)loadBookmarks();};
+bindAction('bookmark-save',async()=>{
+  await call('edit_message_bookmark',{action:'add',ident:dashboardState.context.id,label:el('bookmark-name').value});
+  el('bookmark-new').hidden=true;await loadBookmarks();reportAction('Bookmark saved on this desktop.');
+});

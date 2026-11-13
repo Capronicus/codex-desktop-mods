@@ -140,6 +140,7 @@ def status():
         "settings": bool(cfg and cfg.get("settings")),
         "sidebar": bool(cfg and cfg.get("sidebar")),
         "order": bool(cfg and cfg.get("order")),
+        "tree": bool(cfg and cfg.get("tree")),
         "device_name": cfg and cfg.get("device_name"),
         "device_emoji": cfg and cfg.get("device_emoji", ""),
         "sidebar_preview": {k: preview[k] for k in ("id", "counts") if k in preview} or None,
@@ -158,20 +159,26 @@ def last_folder_check(cfg):
 
 
 def set_exchange_option(option, enabled):
-    if option not in ("colours", "sidebar", "order", "settings") or type(enabled) is not bool:
+    if option not in ("colours", "sidebar", "order", "settings", "tree") or type(enabled) is not bool:
         raise ValueError("Unknown sync option")
     with lock(STATE / "sync.lock"):
         cfg = read_json(CONFIG)
         if not cfg:
             raise ValueError("Choose a private chat sync folder first.")
-        if option == "order" and enabled and not cfg.get("sidebar"):
-            raise ValueError("Enable sidebar sync before syncing pins and order.")
+        if option in ("order","tree") and enabled and not cfg.get("sidebar"):
+            raise ValueError("Enable sidebar sync before sharing sidebar layout.")
         if option == "sidebar" and not enabled:
-            cfg["order"] = False
-        if option in ("sidebar", "order") and not enabled:
+            cfg["order"] = cfg["tree"] = False
+        if option in ("sidebar", "order","tree") and not enabled:
             queue = STATE / "sidebar-layout-pending.json"
-            if not read_json(queue, {}).get("undo"):
-                queue.unlink(missing_ok=True)
+            pending = read_json(queue, {})
+            if pending and not pending.get("undo"):
+                if option == "tree":
+                    pending["changes"] = {k:v for k,v in pending.get("changes", {}).items() if not k.startswith("parent/")}
+                if option == "tree" and pending["changes"]:
+                    atomic(queue, encode(pending))
+                else:
+                    queue.unlink(missing_ok=True)
         cfg[option] = enabled
         atomic(CONFIG, encode(cfg))
     return status()

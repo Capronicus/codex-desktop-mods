@@ -64,8 +64,8 @@ def placement(layout, action, source, parent):
     return owner, [node[len(SECTION):] for node in descendants if node != root]
 
 
-def inventory():
-    layout = desktop.Layout(sync.HOME)
+def inventory(layout=None):
+    layout = layout or desktop.Layout(sync.HOME)
     sections = {s["id"]: s["name"] for s in layout.sections if s["id"] != desktop.PINNED}
     local = {i: p["name"] for i, p in layout.projects.items()
              if projects.valid_id(i) and not p.get("chatGptBacking")}
@@ -73,6 +73,74 @@ def inventory():
     return {"projects": local, "sections": sections, "parents": group_state(layout).get("parents", {}),
             "ready": bool(layout.enabled and layout.account), "pending": job.get("label", "") if job.get("account")==layout.account else "",
             "started": bool(job.get("started")), "error": job.get("error", "") if job.get("account")==layout.account else ""}
+
+
+def group_chats():
+    if not (sync.HOME / "state_5.sqlite").is_file():
+        return {}
+    return {tid: r.get("name") or r.get("title") or tid for tid, r in sync.catalog(include_titles=True).items()
+            if not r["archived"] and "subagent" not in (r.get("source") or "")}
+
+
+def group_batch(steps, commit=False, review=""):
+    """Preview on a disposable layout in memory. Queue only the exact reviewed plan."""
+    if not isinstance(steps, list) or len(steps) > 100:
+        raise ValueError("A batch can contain up to 100 changes.")
+    with sync.lock(sync.STATE / "sync.lock"):
+        layout = desktop.Layout(sync.HOME)
+        if not layout.account or not layout.enabled:
+            raise ValueError("Sign in to organize this sidebar.")
+        group_snapshot = inventory(layout)
+        group_snapshot["parents"] = dict(group_snapshot["parents"])
+        parents = layout.data.setdefault(STORE, {}).setdefault(layout.account, {}).setdefault("parents", {})
+        titles = group_chats()
+        jobs, lines = [], []
+        for step in steps:
+            if not isinstance(step, dict) or set(step) - {"action","source","parent","name","chats"}:
+                raise ValueError("Invalid sidebar change.")
+            action, source, parent, name = (step.get(k, "") for k in ("action","source","parent","name"))
+            if not all(isinstance(v,str) for v in (action, source, parent, name)):
+                raise ValueError("Invalid sidebar group.")
+            groups = inventory(layout)
+            jid = str(uuid.uuid4())
+            ids = step.get("chats", [])
+            if action == "create":
+                if (not projects.valid_id(source) or source in groups["sections"] or source in groups["projects"]
+                        or not parent or not name.strip() or len(name.strip()) > 150):
+                    raise ValueError("Choose a parent and a new subsection name.")
+                placement(layout, action, "", parent)
+                layout.sections.append({"id":source,"name":name.strip(),"itemKeys":[]})
+                label = name.strip()
+            elif action == "move" and source in groups["sections"]:
+                placement(layout, action, source, parent)
+                label = groups["sections"][source]
+            elif action == "assign" and parent:
+                if (not isinstance(ids,list) or not 1 <= len(ids) <= 500 or
+                        any(not isinstance(t,str) or t not in titles for t in ids)):
+                    raise ValueError("Choose existing local chats.")
+                # Chats can live at any level, including the deepest subsection.
+                if parent.startswith(SECTION):
+                    if parent[7:] not in groups["sections"]: raise ValueError("Unknown section.")
+                elif parent not in groups["projects"]: raise ValueError("Unknown project.")
+                label = ", ".join(titles[t] for t in ids)
+            else:
+                raise ValueError("Choose an existing section or project.")
+            location = groups["sections"].get(parent[7:]) if parent.startswith(SECTION) else groups["projects"].get(parent)
+            if action != "assign":
+                if parent: parents[source] = parent
+                else: parents.pop(source,None)
+            lines.append(("Create " if action=="create" else "Move ") + label + " → " + (location or "Top-level sections"))
+            jobs.append({"account":layout.account,"action":action,"source":source if action=="move" else "",
+                         "parent":parent,"name":label,"label":label,"folder":"","id":jid,
+                         "newId":source if action=="create" else "", "chats":list(dict.fromkeys(ids)) if action=="assign" else []})
+        digest = sync.digest(sync.encode([layout.account, steps, lines, group_snapshot]))
+        result = {"groups":inventory(layout),"preview":lines,"review":digest}
+        if not commit: return result
+        if review != digest: raise ValueError("The sidebar changed. Refresh the batch preview before applying.")
+        if not jobs or (sync.STATE / QUEUE).exists(): raise ValueError("Finish the pending batch before applying another.")
+        sync.atomic(sync.STATE / QUEUE, sync.encode({**jobs[0], "remaining":jobs[1:]}))
+        start_worker(sync.HOME)
+        return {"queued":len(jobs)}
 
 
 def change(action, source="", parent="", name="", folder=""):
@@ -196,7 +264,19 @@ def run_change(home, call):
     if not job.get("started"):
         section = next((s for s in sections if s["id"] == source), {})
         project = local.get(source, {})
-        owner, nested = placement(layout, action, source, parent)
+        if action == "assign":
+            leaf = next((s for s in sections if SECTION+s["id"] == parent), None)
+            if parent.startswith(SECTION) and not leaf or not parent.startswith(SECTION) and parent not in local:
+                raise ValueError("The destination group changed. Check the pending batch.")
+            owner = parent
+            seen = set()
+            while owner.startswith(SECTION):
+                if owner in seen: raise ValueError("The destination has a cycle.")
+                seen.add(owner)
+                owner = parents.get(owner[7:], "")
+            nested = []
+        else:
+            owner, nested = placement(layout, action, source, parent)
         if action == "demote" and (not project or project.get("chatGptBacking")) or action in ("move","promote") and not section:
             raise ValueError("This group changed. Cancel and select its current sidebar entry.")
         pid = project_id(source) if action == "demote" else None
@@ -210,6 +290,9 @@ def run_change(home, call):
         else:
             members = thread_members(home, "thread_section_id", sid)
             members.update(k[len(ITEM):] for k in section.get("itemKeys", []) if k.startswith(ITEM))
+        if action == "assign":
+            members = set(job["chats"])
+            sid = leaf.get("hostSectionIds", {}).get("local") or (leaf["id"] if leaf["id"] in native_sections else None) if leaf else None
         # A descendant keeps its own native section when the enclosing project changes.
         nested_members = set()
         for row in sections:
@@ -222,7 +305,7 @@ def run_change(home, call):
         mixed = any(not k.startswith(ITEM) for k in section.get("itemKeys", [])) or any(k != "local" for k in section.get("hostSectionIds", {}))
         previous = retained.get(source, {}) if action == "promote" else {}
         preserve_exclusions(home, members | nested_members, source if action=="demote" else None)
-        target = previous.get("stable") or source or str(uuid.uuid4())
+        target = job.get("newId") or previous.get("stable") or source or str(uuid.uuid4())
         if ((action == "promote" and (target in local or mixed and target == source))
                 or (action in ("create", "demote") and any(s["id"] == target for s in sections))):
             target = str(uuid.uuid4())
@@ -248,7 +331,19 @@ def run_change(home, call):
             p = call("project/create", {"name":record["name"], "roots":[{"path":r} for r in record.get("rootPaths", [])],
                      "metadata":{"codex.localProjectId":owner}, "idempotencyKey":"chat-sync:"+owner})["project"]
             maps[owner] = dest_project = p["id"]
-        dest_section = job["oldSection"] if action == "move" or action == "promote" and job["mixed"] else None
+        dest_section = job["oldSection"] if action in ("move","assign") or action == "promote" and job["mixed"] else None
+        if action in ("create", "demote") or (action == "assign" and parent.startswith(SECTION) and not dest_section):
+            leaf = next((s for s in sections if SECTION + s["id"] == parent), None)
+            section_name = leaf["name"] if action == "assign" else job["name"]
+            # section/create has no idempotency key. Recover an interrupted create by its unique temporary name.
+            temporary = "Sidebar change " + job["id"]
+            dest_section = job.get("newSection") or next((i for i,s in native_sections.items() if s["name"] == temporary), None)
+            if not dest_section:
+                dest_section = call("threadSection/create", {"name":temporary})["section"]["id"]
+            save(newSection=dest_section)
+            call("threadSection/update", {"sectionId":dest_section,"name":section_name})
+            if action == "assign":
+                leaf.setdefault("hostSectionIds", {})["local"] = dest_section
         now = int(time.time() * 1000)
         if action == "promote":
             record = dict(job["original"])
@@ -272,13 +367,6 @@ def run_change(home, call):
             for child in job.get("children", []) + job.get("legacyChildren", []):
                 if any(s["id"] == child for s in sections): parents[child] = target
         elif action in ("create","demote"):
-            # section/create has no idempotency key. Recover an interrupted create by its unique temporary name.
-            temporary = "Sidebar change " + job["id"]
-            dest_section = job.get("newSection") or next((i for i,s in native_sections.items() if s["name"] == temporary), None)
-            if not dest_section:
-                dest_section = call("threadSection/create", {"name":temporary})["section"]["id"]
-            save(newSection=dest_section)
-            call("threadSection/update", {"sectionId":dest_section,"name":job["name"]})
             sections.append({"id":target,"name":job["name"],"hostSectionIds":{"local":dest_section},"itemKeys":[]})
             order = bucket.setdefault("sectionOrder", [])
             if "custom:"+target not in order: order.append("custom:"+target)
@@ -293,7 +381,7 @@ def run_change(home, call):
                         parents[sid] = SECTION + target
                 for s in sections:
                     s["itemKeys"] = [k for k in s.get("itemKeys", []) if k != "codex:project:"+source]
-        if action != "promote":
+        if action not in ("promote","assign"):
             if parent: parents[target] = parent
             else: parents.pop(target,None)
         assignments = layout.data.setdefault("thread-project-assignments", {})
@@ -302,7 +390,7 @@ def run_change(home, call):
         if action != "move":
             for s in sections:
                 s["itemKeys"] = [k for k in s.get("itemKeys", []) if k not in member_keys]
-                if s["id"] == target and action=="demote" or s["id"]==source and action=="promote" and job["mixed"]:
+                if action == "assign" and SECTION + s["id"] == parent or s["id"] == target and action=="demote" or s["id"]==source and action=="promote" and job["mixed"]:
                     s["itemKeys"].extend(ITEM+t for t in members)
         for tid in members + job.get("nestedMembers", []):
             if action != "move" or owner:
@@ -333,6 +421,10 @@ def run_change(home, call):
     ]:
         if ident in rows and not thread_members(home, column, ident):
             call(kind+"/delete", {("projectId" if kind=="project" else "sectionId"):ident})
+    remaining = job.get("remaining", [])
+    if remaining:
+        sync.atomic(path, sync.encode({**remaining[0],"remaining":remaining[1:]}))
+        return False
     path.unlink()
     return True
 

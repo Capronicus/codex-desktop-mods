@@ -17,6 +17,7 @@ import outgoing
 import chat_actions
 import sharing_rules
 import hierarchy
+import bookmarks
 
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 STOP = threading.Event()
@@ -41,6 +42,10 @@ TOOLS = [
     {**tool("open_mod_controls", "Open Mod Controls to see sync health, pause transfers and change appearance.", readonly=True),
      "title": "Mod Controls", "_meta": {"ui": {"resourceUri": controls.URI},
                "openai/ui": {"entrypoints": [{"type": "global"}]}}},
+    tool("set_tree_sync","Share subsection parent links for the signed-in account.",{"enabled":{"type":"boolean"}}),
+    tool("sidebar_batch_chat_choices", "List local chat titles for a sidebar batch.", readonly=True),
+    tool("sidebar_batch", "Preview or queue a reviewed batch of local sidebar changes.",
+         {"steps":{"type":"array","items":{"type":"object"}},"commit":{"type":"boolean"},"review":{"type":"string"}},optional=("commit","review")),
     tool("set_shared_exclusion","Stop or resume project or linked-folder transfers across updated desktops. Existing copies are retained.",
          {"kind":{"type":"string","enum":["project","folder","rule"]},"ident":{"type":"string"},"enabled":{"type":"boolean"}}),
     tool("mod_controls_status", "Read local sync health, receipt counts and visual preferences.", readonly=True),
@@ -162,6 +167,8 @@ ACTIONS = {
     "check_sync_folder": integrity.inspect_folder,
     "repair_sync_folder": lambda: integrity.inspect_folder(repair=True),
     "set_sync_paused": sync.set_paused,
+    "sidebar_batch_chat_choices": hierarchy.group_chats,
+    "sidebar_batch": hierarchy.group_batch,
     "set_mod_visual": controls.set_visual,
     "activation_status": activation.status,
     "report_activation": activation.report,
@@ -176,6 +183,7 @@ ACTIONS = {
     "apply_sidebar_preview": lambda batch: batches.review("apply", batch),
     "undo_sidebar_sync": batches.undo,
     "undo_sidebar_batch": batches.undo,
+    "set_tree_sync": lambda enabled: sync.set_exchange_option("tree",enabled),
     "set_pin_order_sync": lambda enabled: sync.set_exchange_option("order", enabled),
     "chat_sync_status": sync.status,
     "set_settings_sync": lambda enabled: sync.set_exchange_option("settings", enabled),
@@ -193,13 +201,16 @@ ACTIONS = {
 
 # Actions called by the interactive Mod Controls view.
 for name, fn, required, optional, readonly in (
+    ("list_message_bookmarks", bookmarks.list_marks, (), (), True),
+    ("edit_message_bookmark", bookmarks.edit, ("action","ident"), ("label",), False),
     ("sidebar_group_inventory", hierarchy.inventory, (), (), True),
     ("change_sidebar_group", hierarchy.change, ("action",), ("source","parent","name","folder"), False),
     ("chat_action_dashboard", chat_actions.dashboard, (), (), True),
     ("open_linked_file", chat_actions.open_file, ("thread","reference"), (), True),
     ("edit_linked_file", chat_actions.edit_file, ("thread","reference"), (), False),
     ("reveal_linked_file", chat_actions.reveal_file, ("thread","reference"), (), False),
-    ("send_reply_handoff", chat_actions.handoff, ("thread","turn","device","request"), ("note","item"), False),
+    ("send_reply_handoff", chat_actions.handoff, ("thread","turn","device","request"), ("note","item","reference"), False),
+    ("compare_handoff_file", chat_actions.compare_handoff_file, ("sender","request"), (), True),
     ("read_handoff_reply", chat_actions.reply, ("thread","turn"), ("item",), True),
     ("dismiss_reply_handoff", chat_actions.dismiss, ("sender","request"), (), False),
     ("list_chat_family", chat_actions.family, ("thread",), (), True),
@@ -233,7 +244,7 @@ def handle(req):
         version = params.get("protocolVersion")
         return {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[0],
-            "serverInfo": {"name": "chat-sync", "version": "0.14.0"},
+            "serverInfo": {"name": "chat-sync", "version": "0.15.0"},
             "capabilities": {"tools": {}, "resources": {}},
         }
     if method == "ping":
@@ -252,7 +263,7 @@ def handle(req):
     args = params.get("arguments", {})
     schema = next(t["inputSchema"] for t in TOOLS if t["name"] == name)
     fields = schema["properties"]
-    types = {"string": str, "boolean": bool, "integer": int}
+    types = {"string": str, "boolean": bool, "integer": int, "array": list}
     if (
         not isinstance(args, dict)
         or not set(schema.get("required", ())) <= args.keys() <= fields.keys()

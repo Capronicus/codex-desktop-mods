@@ -101,6 +101,26 @@ class SidebarGroups(unittest.TestCase):
                         hierarchy.change("demote",source=key)
                         hierarchy.change("cancel")
                         self.assertFalse(hierarchy.inventory()["pending"])
+                        one, two = str(uuid.uuid4()), str(uuid.uuid4())
+                        steps = [{"action":"create","parent":key,"source":one,"name":"Elysium"},
+                                 {"action":"create","parent":"custom:"+one,"source":two,"name":"Seurat"},
+                                 {"action":"assign","parent":"custom:"+two,"chats":[tid]}]
+                        preview = hierarchy.group_batch(steps)
+                        self.assertEqual(len(preview["preview"]),3)
+                        self.assertNotIn(two,hierarchy.inventory()["sections"])
+                        with self.assertRaisesRegex(ValueError,"three levels"):
+                            hierarchy.group_batch(steps+[{"action":"create","parent":"custom:"+two,"source":str(uuid.uuid4()),"name":"Invalid"}])
+                        with self.assertRaisesRegex(ValueError,"Refresh the batch"):
+                            hierarchy.group_batch(steps,True,"stale")
+                        hierarchy.group_batch(steps,True,preview["review"])
+                        self.assertFalse(hierarchy.run_change(home,app.call))
+                        self.assertFalse(hierarchy.run_change(home,app.call))
+                        self.assertTrue(hierarchy.run_change(home,app.call))
+                        lay = desktop_layout.Layout(home)
+                        row = app.call("thread/read",{"threadId":tid})["thread"]
+                        self.assertEqual(row["projectId"],lay.project_ids[key])
+                        self.assertEqual(row["section"]["id"],lay.section_ids[two])
+                        self.assertEqual(hierarchy.inventory()["parents"][two],"custom:"+one)
                         self.assertEqual(marker.read_text(),"untouched")
             finally:
                 model.terminate();model.wait();model.stdout.close()
