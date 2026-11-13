@@ -3,11 +3,16 @@
 
     python3 tools/catalogue_report.py /usr/lib/chatgpt/resources/app.asar
     python3 tools/catalogue_report.py app.asar --candidates new-modules.json
+    python3 tools/catalogue_report.py app.asar --record tests/fixtures/renderer
 
 Each catalogued module is reported as supported, changed or missing. A changed
 module is measured again and written as a candidate entry for review. The last
 line repeats the real patch on a scratch copy, so its error names the first
 hook that no longer fits.
+
+--record saves each supported module that an adapter rewrites, so
+tests/renderer_fixtures.py can run the adapters without the desktop app. Those
+files are excerpts of the desktop app. Keep them on your own computer.
 """
 import argparse
 from collections import defaultdict
@@ -151,7 +156,7 @@ def factory_end(data, brace):
     raise ValueError('Unterminated module')
 
 
-def inspect(archive, catalogue):
+def inspect(archive, catalogue, record=None):
     """Classify every catalogued module start found in the build's async chunks."""
     starts = defaultdict(list)
     for sha, info in catalogue.items():
@@ -176,6 +181,8 @@ def inspect(archive, catalogue):
                 supported[start] = known
                 measured += 1
                 agreed += end == match.start() + catalogue[known]['size']
+                if record is not None and catalogue[known]['role'] != 'dependency':
+                    record[known] = data[match.start():match.start() + catalogue[known]['size']]
                 continue
             sample = starts[start][0][1]
             row = {'id': sample['id'], 'role': sample['role'], 'start': sample['start'], 'file': name,
@@ -190,11 +197,24 @@ def inspect(archive, catalogue):
             'scanner': [agreed, measured]}
 
 
-def patch_error(path):
+def save_fixtures(directory, modules, catalogue):
+    directory.mkdir(parents=True, exist_ok=True)
+    index = {}
+    for sha, source in sorted(modules.items()):
+        name = catalogue[sha]['role'] + '-' + sha[:12] + '.js'
+        (directory / name).write_bytes(source)
+        index[name] = {'sha256': sha, 'role': catalogue[sha]['role'], 'id': catalogue[sha]['id']}
+    saved = json.loads((directory / 'index.json').read_text(encoding='utf-8')) if (directory / 'index.json').is_file() else {}
+    (directory / 'index.json').write_text(json.dumps({**saved, **index}, indent=1, sort_keys=True) + '\n', encoding='utf-8')
+    return len(index)
+
+
+def patch_error(path, scratch=None):
     """Run the real patcher against a scratch copy. None means the build is supported."""
-    sys.path.insert(0, str(ROOT))
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
     patcher = importlib.import_module('sidebar-colours')
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(dir=scratch) as tmp:
         try:
             patcher.patch_archive(Path(tmp) / 'app.asar', archive=Path(path))
         except Exception as error:
@@ -207,15 +227,19 @@ def main(argv=None):
     parser.add_argument('archive', type=Path, help='the desktop build\'s resources/app.asar')
     parser.add_argument('--catalogue', type=Path, default=ROOT / 'renderer-modules.json')
     parser.add_argument('--candidates', type=Path, help='write changed modules as catalogue entries for review')
+    parser.add_argument('--record', type=Path, help='save supported adapter modules as local test fixtures')
     parser.add_argument('--json', action='store_true', help='print the report as JSON')
     parser.add_argument('--no-patch', action='store_true', help='skip the patch run on a scratch copy')
     args = parser.parse_args(argv)
     catalogue = json.loads(args.catalogue.read_text(encoding='utf-8'))
     archive = Archive(args.archive)
+    recorded = {} if args.record else None
     try:
-        report = inspect(archive, catalogue)
+        report = inspect(archive, catalogue, recorded)
     finally:
         archive.close()
+    if args.record:
+        report['recorded'] = save_fixtures(args.record, recorded, catalogue)
     report['patch'] = 'skipped' if args.no_patch else patch_error(args.archive) or 'ok'
     candidates = {row['sha256']: {key: row[key] for key in ('id', 'role', 'start', 'size')}
                   for row in report['changed'] if 'sha256' in row}
@@ -237,6 +261,8 @@ def main(argv=None):
         if agreed != measured:
             print('  The measurement disagrees with a reviewed module. Check candidate sizes by hand.')
         print('Patch on a scratch copy: ' + report['patch'])
+        if args.record:
+            print(f"Saved {report['recorded']} modules to {args.record} for tests/renderer_fixtures.py.")
         if args.candidates:
             print(f'Wrote {len(candidates)} candidate entries to {args.candidates}. Review each adapter before adding them.')
     return 0 if not report['changed'] and not report['missing'] and report['patch'] in ('ok', 'skipped') else 1

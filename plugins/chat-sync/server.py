@@ -19,6 +19,7 @@ import sharing_rules
 import hierarchy
 import bookmarks
 import maintenance
+import incoming
 
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 STOP = threading.Event()
@@ -52,6 +53,10 @@ TOOLS = [
     tool("mod_controls_status", "Read local sync health, receipt counts and visual preferences.", readonly=True),
     tool("preview_chat_sharing", "Preview outgoing local chats and exclusions without transferring histories. Pages start at zero.",
          {"group": {"type": "string", "enum": ["all", *outgoing.GROUPS]},
+          "search": {"type": "string", "maxLength": 256}, "page": {"type": "integer", "minimum": 0}},
+         readonly=True, optional=("group", "search", "page")),
+    tool("preview_incoming_chats", "Preview the chats a sync would add, extend or hold back on this desktop, without receiving them. Pages start at zero.",
+         {"group": {"type": "string", "enum": ["all", *incoming.GROUPS]},
           "search": {"type": "string", "maxLength": 256}, "page": {"type": "integer", "minimum": 0}},
          readonly=True, optional=("group", "search", "page")),
     {**tool("undo_sidebar_batch", "Undo the sidebar batch displayed in Mod Controls.",
@@ -126,6 +131,8 @@ TOOLS = [
         {"enabled": {"type": "boolean"}},
     ),
     tool("sync_settings_now", "Exchange only supported desktop appearance and chat preferences."),
+    tool("preview_settings_sync", "List the appearance and chat settings another desktop would change here, without applying them.", readonly=True),
+    tool("apply_settings_preview", "Apply the reviewed settings using the preview's exact ID.", {"review": {"type": "string"}}),
     tool("chat_sync_status", "Show local configuration and the last sync result.", readonly=True),
     tool(
         "configure_chat_sync",
@@ -169,6 +176,7 @@ ACTIONS = {
     "open_mod_controls": controls.status,
     "mod_controls_status": controls.status,
     "preview_chat_sharing": outgoing.preview,
+    "preview_incoming_chats": incoming.preview,
     "mod_controls_sync": controls.sync_now,
     "check_sync_folder": integrity.inspect_folder,
     "repair_sync_folder": lambda: integrity.inspect_folder(repair=True),
@@ -197,6 +205,8 @@ ACTIONS = {
     "chat_sync_status": sync.status,
     "set_settings_sync": lambda enabled: sync.set_exchange_option("settings", enabled),
     "sync_settings_now": sync.sync_settings_now,
+    "preview_settings_sync": lambda: sync.sync_settings_now("preview"),
+    "apply_settings_preview": lambda review: sync.sync_settings_now("apply", review),
     "configure_chat_sync": sync.setup,
     "sync_chats": sync.run,
     "sync_colours_now": sync.sync_colours_now,

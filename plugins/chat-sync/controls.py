@@ -67,6 +67,7 @@ def status():
             "queued": ("undo" if queue.get("undo") else "apply") if queue else None,
             "required": bool(cfg.get("sidebar") and (sync.STATE / "sidebar-preview.json").is_file()),
         },
+        "settingsReview": bool(cfg.get("settings") and (sync.STATE / "settings-preview.json").is_file()),
         "privateChats": rules.get("private_chats", []), "privateProjects": rules.get("private_projects", []),
         "visuals": visuals(),
     }

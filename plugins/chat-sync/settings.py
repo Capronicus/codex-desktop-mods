@@ -153,8 +153,9 @@ def save(path, doc):
         sync.atomic(path, data)
 
 
-def exchange(home, vault, device):
+def exchange(home, vault, device, action="sync", approval=""):
     directory = vault / "settings-v1"
+    preview_file = home / "chat-sync" / "settings-preview.json"
     checkpoint = home / "chat-sync" / ("settings-" + device + ".json")
     state = sync.read_json(checkpoint, {})
     previous = state.get("applied", {})
@@ -192,6 +193,7 @@ def exchange(home, vault, device):
         desktop = native_preferences(desktop)
         skipped = []
         edits = []
+        changes = []
         observed = {}
         for key in sorted(KEYS):
             local = desktop.get(key)
@@ -214,6 +216,7 @@ def exchange(home, vault, device):
                     winners[key] = candidate
             if key in winners and local != winners[key][2]:
                 observed[key] = local
+                changes.append({"key": key, "before": local, "after": winners[key][2], "device": winners[key][1]})
                 edits.append(
                     {
                         "keyPath": "desktop." + key,
@@ -221,6 +224,16 @@ def exchange(home, vault, device):
                         "mergeStrategy": "replace",
                     }
                 )
+        review = sync.digest(sync.encode(changes))
+        if action == "preview":
+            return {"id": review, "changes": changes, "skipped_local": skipped, "deferred_devices": deferred}
+        if action == "apply" and approval != review:
+            raise ValueError("The settings preview changed. Request a fresh preview.")
+        # The first settings a desktop receives replace its own. Show them before anything is written.
+        if edits and action != "apply" and "applied" not in state:
+            save(preview_file, {"id": review, "count": len(changes)})
+            return {"preview_required": True, "id": review, "changes": len(changes), "deferred_devices": deferred}
+        preview_file.unlink(missing_ok=True)
         # Record the intended changes before writing so a retry can recognise its own edits.
         if edits:
             save(checkpoint, {"applied": previous, "pending": winners, "before": observed})

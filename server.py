@@ -24,6 +24,9 @@ TOOLS = [
          'Read the installed desktop build, menu launcher and mod state.', read_only=True),
     tool('apply_desktop_mods', 'Apply desktop mods',
          'Apply or update the sidebar and message mods on the user’s cached desktop app.'),
+    tool('desktop_mods_compatibility', 'Check desktop compatibility',
+         'List the renderer modules of the installed desktop build that the mods no longer recognise, '
+         'and the first hook that does not fit.', read_only=True),
     tool('remove_desktop_mods', 'Remove desktop mods',
          'Disable the patched launcher and remove unused patch files. Keeps profile preferences.',
          destructive=True),
@@ -61,6 +64,9 @@ def dispatch(method, params):
         if name in ('activation_status', 'report_activation'):
             choice = activation.status() if name == 'activation_status' else activation.report(args['destination'])
             return {'content': [{'type': 'text', 'text': json.dumps(choice)}]}
+        if name == 'desktop_mods_compatibility':
+            import compatibility
+            return {'content': [{'type': 'text', 'text': json.dumps(compatibility.report())}]}
         if sys.platform == 'win32':
             import windows_mods as manager
         elif sys.platform.startswith('linux'):

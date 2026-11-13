@@ -75,6 +75,11 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 18px;margin:10px 0
 <div id="preview-result" hidden><p id="change-count" role="status"></p><ul id="change-list"></ul>
 <p id="review-hint" class="hint"></p><div class="actions"><button id="more-changes" hidden>Show more changes</button>
 <button id="apply-sidebar" hidden disabled>Apply reviewed changes</button></div></div></section>
+<section id="settings-review" hidden><h2>Settings changes</h2>
+<p id="settings-status">Another desktop has appearance or chat settings that differ from this one. Review them before they replace yours.</p>
+<ul id="settings-changes"></ul>
+<div class="actions"><button id="preview-settings" disabled>Review settings</button>
+<button id="apply-settings" hidden disabled>Apply these settings</button></div></section>
 <section id="integrity" hidden><h2>Sync folder health</h2>
 <p id="report">Check that this desktop’s sync folder has a complete copy of each currently shared chat revision.</p>
 <p id="repair-hint" class="hint"></p>
@@ -89,6 +94,7 @@ const pending = new Map();
 let seq = 0, state, working = true;
 let preview=null, visibleChanges=25;
 let outgoing=null;
+let settingsPreview=null;
 const sharingGroups={all:'All local chats',pending:'New or changed',check:'Needs checking',unchanged:'No local changes',excluded:'Local-only',unavailable:'Unavailable'};
 const sharingReasons={new:'New on this desktop',changed:'Changed since last local snapshot',unchanged:'No local changes',unindexed:'Sync will check the source of this unindexed history',no_fingerprint:'Awaiting local snapshot check',recovery:'Awaiting recovery check',chat_rule:'Excluded by chat rule',project_rule:'Excluded by project rule',folder_rule:'Excluded by folder rule',multiple_files:'Multiple local history files',missing_file:'History file missing',unreadable:'History file unavailable'};
 for(const [value,label] of Object.entries(sharingGroups))el('outgoing-group').add(new Option(label,value));
@@ -151,6 +157,18 @@ function describeChange({action,id,before,after},names){
   }
   const [kind,operation]=action.split('_');
   return [operation==='created'?'Create '+kind:'Rename '+kind,operation==='created'?after:before+' → '+after];
+}
+function renderSettings(s){
+  el('settings-review').hidden=!s.configured||!s.settingsReview;
+  if(!s.settingsReview)settingsPreview=null;
+  el('preview-settings').disabled=el('apply-settings').disabled=working||!s.available;
+  el('apply-settings').hidden=!settingsPreview?.changes.length;
+  const shown=value=>value==null?'not set':typeof value==='object'?'custom theme':String(value);
+  el('settings-changes').replaceChildren(...(settingsPreview?.changes||[]).map(change=>{
+    const item=document.createElement('li');
+    item.textContent=change.key+' · '+shown(change.before)+' → '+shown(change.after);
+    return item;
+  }));
 }
 function renderSidebar(s){
   const enabled=s.configured&&s.options.sidebar, info=s.sidebarReview;
@@ -243,6 +261,7 @@ function render(){
   const s=state,h=s.health,r=s.receipts;
   renderOutgoing(s);
   renderSidebar(s);
+  renderSettings(s);
   el('overview').textContent=!s.configured?'Disconnected':s.paused?'Sync paused':!s.available?'Folder unavailable':s.automatic?'Automatic sync on':'Manual sync';
   el('setup').hidden=s.configured;el('health').replaceChildren();
   if(s.configured){
@@ -343,6 +362,14 @@ el('apply-sidebar').onclick=()=>act('apply_sidebar_preview',{batch:preview.id},r
   return [result.desktop_refresh_on_quit?'Fully quit and reopen the app to see the updated layout.':'Reviewed changes applied.',
     result.pending_chats?'Some chats are still waiting to sync.':'',
     result.deferred_devices?.length?'Some device records are still unavailable.':''].filter(Boolean).join(' ');
+});
+el('preview-settings').onclick=()=>act('preview_settings_sync',{},result=>{
+  settingsPreview=result;
+  return result.changes.length?'':'No setting differs on this desktop.';
+});
+el('apply-settings').onclick=()=>act('apply_settings_preview',{review:settingsPreview.id},()=>{
+  settingsPreview=null;
+  return 'Settings applied on this desktop.';
 });
 el('undo-sidebar').onclick=()=>act('undo_sidebar_batch',{batch:state.sidebarReview.undoBatch},result=>
   result.undo_on_quit?'Fully quit the app to finish undoing the last sidebar batch.':'Sidebar restored. Project, section and order sync are off on this desktop.');

@@ -4,6 +4,7 @@ from contextlib import closing, contextmanager
 from datetime import datetime
 import gzip
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -169,6 +170,8 @@ def set_exchange_option(option, enabled):
             raise ValueError("Enable sidebar sync before sharing sidebar layout.")
         if option == "sidebar" and not enabled:
             cfg["order"] = cfg["tree"] = False
+        if option == "settings" and not enabled:
+            (STATE / "settings-preview.json").unlink(missing_ok=True)
         if option in ("sidebar", "order","tree") and not enabled:
             queue = STATE / "sidebar-layout-pending.json"
             pending = read_json(queue, {})
@@ -184,18 +187,19 @@ def set_exchange_option(option, enabled):
     return status()
 
 
-def sync_settings_now():
+def sync_settings_now(action="sync", approval=""):
     import settings
     import projects
 
     with lock(STATE / "sync.lock"):
         cfg, vault = projects.config()
-        require_active(cfg)
+        if action != "preview":
+            require_active(cfg)
         if not cfg.get("settings"):
             raise ValueError("Enable appearance and chat settings sync on this desktop first.")
         if not vault.is_dir():
             raise ValueError("Sync folder unavailable. Check the mount or desktop sync client.")
-        return settings.exchange(HOME, vault, cfg["device"])
+        return settings.exchange(HOME, vault, cfg["device"], action, approval)
 
 
 def sync_colours_now():
@@ -225,7 +229,7 @@ def disable():
             saved["exclusions"] = {k: cfg.get(k, []) for k in ("private_chats", "private_projects", "private_folders")}
             atomic(STATE / "disconnected.json", encode(saved))
         CONFIG.unlink(missing_ok=True)
-        for name in ("sidebar-layout-pending.json", "sidebar-preview.json", "last.json"):
+        for name in ("sidebar-layout-pending.json", "sidebar-preview.json", "settings-preview.json", "last.json"):
             (STATE / name).unlink(missing_ok=True)
     return {"configured": False}
 
@@ -299,8 +303,20 @@ def open_rollout(path):
     try:
         from compression import zstd
     except ImportError:
+        try:
+            import zstandard
+        except ImportError:
+            zstandard = None
+        if zstandard:
+            # The optional package needs no separate program, which Windows lacks by default.
+            try:
+                with path.open("rb") as raw, zstandard.ZstdDecompressor().stream_reader(raw) as reader:
+                    yield io.BufferedReader(reader)
+            except zstandard.ZstdError as exc:
+                raise ValueError("Could not unpack the compressed conversation.") from exc
+            return
         if not shutil.which("zstd"):
-            raise ValueError("Compressed chat needs Python 3.14+ or the zstd executable.")
+            raise ValueError("Compressed chat needs Python 3.14+, the zstandard package or the zstd executable.")
         proc = subprocess.Popen(["zstd", "-qdc", "--", str(path)], stdout=subprocess.PIPE)
         drained = False
         try:
@@ -670,8 +686,14 @@ def materialize(vault, man, local, cwd=None, checkout=None):
                     try:
                         from compression import zstd
                     except ImportError:
-                        with open(compressed, "wb") as out:
-                            subprocess.run(["zstd", "-q", "-c", "--", tmp], stdout=out, check=True)
+                        try:
+                            import zstandard
+                        except ImportError:
+                            with open(compressed, "wb") as out:
+                                subprocess.run(["zstd", "-q", "-c", "--", tmp], stdout=out, check=True)
+                        else:
+                            with open(tmp, "rb") as raw, open(compressed, "wb") as out:
+                                zstandard.ZstdCompressor().copy_stream(raw, out)
                     else:
                         with open(tmp, "rb") as raw, zstd.open(compressed, "wb") as out:
                             shutil.copyfileobj(raw, out)

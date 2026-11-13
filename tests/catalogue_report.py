@@ -70,6 +70,26 @@ class CatalogueReport(unittest.TestCase):
         self.assertEqual(json.loads(candidates.read_text()),
                          {hashlib.sha256(newer).hexdigest(): {'id': 'BBBB', 'role': 'prefs', 'start': 'BBBB(e,t,n){', 'size': len(newer)}})
 
+    def test_recording_and_installed_build_report(self):
+        fixtures = self.root / 'fixtures'
+        code, result = self.run_report(STEADY + b',' + EDITED + b',' + REMOVED, '--record', str(fixtures))
+        # Dependencies are only fingerprinted. Adapters rewrite the other two.
+        self.assertEqual((code, result['recorded']), (0, 2))
+        index = json.loads((fixtures / 'index.json').read_text())
+        self.assertEqual({row['role'] for row in index.values()}, {'row', 'prefs'})
+        for name, row in index.items():
+            self.assertEqual(hashlib.sha256((fixtures / name).read_bytes()).hexdigest(), row['sha256'])
+
+        import sys
+        from unittest.mock import patch
+        sys.path.insert(0, str(REPO))
+        import compatibility
+        with patch.object(compatibility, 'installed_archive', return_value=(self.root / 'app.asar', '1.2', 'earlier reason', None)):
+            status = compatibility.report()
+        catalogued = {row['start'] for row in json.loads((REPO / 'renderer-modules.json').read_text()).values()}
+        self.assertEqual((status['compatible'], status['supported'], status['patch']), (False, 0, 'not run'))
+        self.assertEqual((len(status['missing']), status['recorded_failure']), (len(catalogued), 'earlier reason'))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -9,6 +9,7 @@ import projects, delivery, batches
 import integrity
 import outgoing
 import maintenance
+import incoming
 
 
 def main():
@@ -23,6 +24,10 @@ def main():
     sharing.add_argument("--group", choices=("all", *outgoing.GROUPS), default="all")
     sharing.add_argument("--search", default="")
     sharing.add_argument("--page", type=int, default=0)
+    receiving = sub.add_parser("preview-incoming")
+    receiving.add_argument("--group", choices=("all", *incoming.GROUPS), default="all")
+    receiving.add_argument("--search", default="")
+    receiving.add_argument("--page", type=int, default=0)
     sub.add_parser("check-folder")
     sub.add_parser("repair-folder")
     sub.add_parser("compact-folder").add_argument("--apply", action="store_true")
@@ -32,6 +37,8 @@ def main():
     retire.add_argument("--review", default="")
     sub.add_parser("sync-colours")
     sub.add_parser("sync-settings")
+    sub.add_parser("preview-settings")
+    sub.add_parser("apply-settings").add_argument("review")
     sub.add_parser("settings").add_argument("mode", choices=("on", "off"))
     sub.add_parser("disable")
     sub.add_parser("pause")
@@ -115,10 +122,16 @@ def main():
             result = sync.adopt_history(args.thread, args.device)
         elif args.command == "sync-settings":
             result = sync.sync_settings_now()
+        elif args.command == "preview-settings":
+            result = sync.sync_settings_now("preview")
+        elif args.command == "apply-settings":
+            result = sync.sync_settings_now("apply", args.review)
         elif args.command == "sync-colours":
             result = sync.sync_colours_now()
         elif args.command in ("check-folder", "repair-folder"):
             result = integrity.inspect_folder(repair=args.command == "repair-folder")
+        elif args.command == "preview-incoming":
+            result = incoming.preview(args.group, args.search, args.page)
         elif args.command == "compact-folder":
             result = maintenance.compact(args.apply)
         elif args.command == "devices":
